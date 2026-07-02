@@ -34,10 +34,34 @@ def main():
     load_images() # Only load images once, before entering the while loop
 
     running = True
+
+    sq_selected = () # No square is selected initially. Tuple: (row, col)
+    player_clicks = [] # Keep track of the player clicks. List of two tuples: [(row, col), (row1, col1)]
+
     while running:
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 running = False
+            elif e.type == pg.MOUSEBUTTONDOWN:
+                location = pg.mouse.get_pos() # (x, y) location of the mouse
+
+                col = location[0] // SQ_SIZE
+                row = location[1] // SQ_SIZE
+
+                if sq_selected == (row, col): # User clicked the same square twice
+                    # Deselect and clear player clicks
+                    sq_selected = ()
+                    player_clicks = []
+                else:
+                    sq_selected = (row, col)
+                    player_clicks.append(sq_selected) # Store the square player selected
+
+                if len(player_clicks) == 2:
+                    move = chessEngine.Move(player_clicks[0], player_clicks[1], gs.board)
+                    gs.make_move(move)
+                    # Deselect and clear player clicks
+                    sq_selected = ()
+                    player_clicks = []
 
         draw_game_state(screen, gs)
 
@@ -61,6 +85,7 @@ def draw_board(screen):
         for col in range(DIMENSION):
             color = colors[((row + col) % 2)]
             pg.draw.rect(screen, color, pg.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
+
 '''
 Draw the pieces on the board using the current GameState.board
 '''
