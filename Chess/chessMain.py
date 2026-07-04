@@ -17,7 +17,7 @@ Initialize a global dictionary of images
 def load_images():
     pieces = ['bB', 'bK', 'bN', 'bP', 'bQ', 'bR', 'wB', 'wK', 'wN', 'wP', 'wQ', 'wR']
     for piece in pieces:
-        IMAGES[piece] = pg.transform.scale(pg.image.load('images/' + piece + '.png'), (SQ_SIZE, SQ_SIZE))
+        IMAGES[piece] = pg.transform.smoothscale(pg.image.load('images/' + piece + '.png'), (SQ_SIZE, SQ_SIZE))
 
 '''
 Main driver: handling user input and updating the graphics
@@ -42,6 +42,7 @@ def main():
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 running = False
+            # Mouse handle
             elif e.type == pg.MOUSEBUTTONDOWN:
                 location = pg.mouse.get_pos() # (x, y) location of the mouse
 
@@ -59,9 +60,14 @@ def main():
                 if len(player_clicks) == 2:
                     move = chessEngine.Move(player_clicks[0], player_clicks[1], gs.board)
                     gs.make_move(move)
+                    print(move.get_chess_notation())
                     # Deselect and clear player clicks
                     sq_selected = ()
                     player_clicks = []
+            # Key handle
+            elif e.type == pg.KEYDOWN:
+                if e.key == pg.K_z:
+                    gs.unmake_move()
 
         draw_game_state(screen, gs)
 

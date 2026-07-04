@@ -30,6 +30,12 @@ class GameState:
         self.move_log.append(move)
         self.white_to_move = not self.white_to_move
 
+    def unmake_move(self):
+        if len(self.move_log) != 0: # There are move to unmake
+            last_move = self.move_log.pop()
+            self.board[last_move.start_row][last_move.start_col] = last_move.piece_moved
+            self.board[last_move.end_row][last_move.end_col] = last_move.piece_captured
+            self.white_to_move = not self.white_to_move 
 
 class Move:
     # Dictionary to translate rows and cols to ranks and files of chess notation
@@ -56,5 +62,17 @@ class Move:
         return self.cols_to_files[col] + self.rows_to_ranks[row]
 
     def get_chess_notation(self):
-        # TODO: Implement proper chess notation logic
-        return self.get_file_rank(self.start_row, self.start_col) + self.get_file_rank(self.end_row, self.end_col)
+        notation = ''
+        if self.piece_moved and self.piece_moved[1] != 'P':
+            notation = self.piece_moved[1]
+        else:
+            notation = ''
+
+        if self.piece_captured != '--':
+            notation += 'x'
+
+        # PLAN: Cover the checkmate with an '#' at the end of the notation
+
+        # Standard chess notation:
+        # 1.e4 e5 2.Qh5?! Nc6 3.Bc4 Nf6?? 4.Qxf7#
+        return notation + self.get_file_rank(self.end_row, self.end_col)
