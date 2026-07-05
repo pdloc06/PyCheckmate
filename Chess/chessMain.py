@@ -1,5 +1,5 @@
 """
-This is the main driver file responsible for handling user input and displaying current GameState object.
+Main driver: handling user input and displaying current GameState object.
 """
 
 import pygame as pg
@@ -88,7 +88,7 @@ Responsible for all the graphics within a current game state
 '''
 def draw_game_state(screen, gs):
     draw_board(screen)
-    # PLANNING: add pieces highlighting and move suggestions
+    # PLAN: add pieces highlighting and move suggestions
     draw_pieces(screen, gs.board)
 
 '''

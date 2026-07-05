@@ -1,5 +1,5 @@
 """
-This class is responsible for:
+GameState is responsible for:
 - Storing all the information about the current state of the game.
 - Determining the valid moves at the current state.
 - Keeping the move log.
@@ -143,6 +143,9 @@ class GameState:
                 end_piece = self.board[end_row][end_col]
                 if end_piece == '--' or self.friendly_color != end_piece[0]:
                     possible_moves.append(Move((row, col), (end_row, end_col), self.board))
+
+
+
 
 class Move:
     # Dictionary to translate rows and cols to ranks and files of chess notation
