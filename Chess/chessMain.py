@@ -51,8 +51,7 @@ def main():
                 row = location[1] // SQ_SIZE
 
                 if sq_selected == (row, col): # User clicked the same square twice
-                    # Deselect and clear player clicks
-                    sq_selected = ()
+                    sq_selected = () # Deselect and clear player clicks
                     player_clicks = []
                 else:
                     sq_selected = (row, col)
@@ -61,13 +60,15 @@ def main():
 
                 if len(player_clicks) == 2:
                     move = chessEngine.Move(player_clicks[0], player_clicks[1], gs.board)
-                    if move in valid_moves: # Only allow to make a move when it's valid
-                        gs.make_move(move)
-                        print(move.get_chess_notation())
-                        move_made = True
-                    # Deselect and clear player clicks
-                    sq_selected = ()
-                    player_clicks = []
+                    for i in range(len(valid_moves)):
+                        if move == valid_moves[i]:
+                            gs.make_move(move)
+                            print(move.get_chess_notation())
+                            move_made = True
+                            sq_selected = () # Deselect and clear player clicks
+                            player_clicks = []
+                    if not move_made:
+                        player_clicks = [sq_selected]
             # Key handle
             elif e.type == pg.KEYDOWN:
                 if e.key == pg.K_z and (e.mod & (pg.KMOD_META | pg.KMOD_CTRL)): # CMD/CTRL + Z to undo last move
