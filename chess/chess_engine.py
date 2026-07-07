@@ -603,17 +603,6 @@ class GameState:
 
 
 '''
-Storing castle rights
-'''
-class CastleRights:
-    def __init__(self, white_king_side, white_queen_side, black_king_side, black_queen_side):
-        self.white_king_side = white_king_side
-        self.white_queen_side = white_queen_side
-        self.black_king_side = black_king_side
-        self.black_queen_side = black_queen_side
-
-
-'''
 Move:
 - Storing move information: sq_start, sq_end, move_type, promotion
 - Each move_type has separated method, access by:
@@ -738,3 +727,14 @@ class Move:
         if self.is_pawn_promotion:
             notation += '=' + self.promotion_piece
         return notation
+
+
+'''
+Storing castle rights
+'''
+class CastleRights:
+    def __init__(self, white_king_side, white_queen_side, black_king_side, black_queen_side):
+        self.white_king_side = white_king_side
+        self.white_queen_side = white_queen_side
+        self.black_king_side = black_king_side
+        self.black_queen_side = black_queen_side
