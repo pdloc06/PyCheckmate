@@ -59,14 +59,19 @@ def main():
                     player_clicks.append(sq_selected) # Store the square player selected
 
                 if len(player_clicks) == 2:
-                    move = chessEngine.Move(player_clicks[0], player_clicks[1], gs.board)
-                    for i in range(len(valid_moves)):
-                        if move == valid_moves[i]:
-                            gs.make_move(move)
-                            print(move.get_chess_notation())
+                    for candidate in valid_moves:
+                        if (
+                            candidate.start_row == player_clicks[0][0]
+                            and candidate.start_col == player_clicks[0][1]
+                            and candidate.end_row == player_clicks[1][0]
+                            and candidate.end_col == player_clicks[1][1]
+                        ):
+                            gs.make_move(candidate)
+                            print(candidate.get_chess_notation())
                             move_made = True
                             sq_selected = () # Deselect and clear player clicks
                             player_clicks = []
+                            break
                     if not move_made:
                         player_clicks = [sq_selected]
             # Key handle

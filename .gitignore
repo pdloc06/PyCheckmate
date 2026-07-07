@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Personal Documents
+CHESS_ENGINE_GUIDE.md
