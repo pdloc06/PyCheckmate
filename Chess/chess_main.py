@@ -3,7 +3,7 @@ Main driver: handling user input and displaying current GameState object.
 """
 
 import pygame as pg
-from Chess import chessEngine
+from Chess import chess_engine
 
 WIDTH = HEIGHT = 512
 DIMENSION = 8 # Dimensions of a chess board are 8x8
@@ -29,7 +29,7 @@ def main():
     clock = pg.time.Clock()
     screen.fill(pg.Color('white'))
 
-    gs = chessEngine.GameState()
+    gs = chess_engine.GameState()
     valid_moves = gs.get_valid_moves()
     move_made = False # Flag variable, preventing overrun of the gs.get_valid_moves() function
 
@@ -59,15 +59,15 @@ def main():
                     player_clicks.append(sq_selected) # Store the square player selected
 
                 if len(player_clicks) == 2:
-                    for candidate in valid_moves:
+                    for move in valid_moves:
                         if (
-                            candidate.start_row == player_clicks[0][0]
-                            and candidate.start_col == player_clicks[0][1]
-                            and candidate.end_row == player_clicks[1][0]
-                            and candidate.end_col == player_clicks[1][1]
+                            move.start_row == player_clicks[0][0]
+                            and move.start_col == player_clicks[0][1]
+                            and move.end_row == player_clicks[1][0]
+                            and move.end_col == player_clicks[1][1]
                         ):
-                            gs.make_move(candidate)
-                            print(candidate.get_chess_notation())
+                            gs.make_move(move)
+                            print(move.get_chess_notation())
                             move_made = True
                             sq_selected = () # Deselect and clear player clicks
                             player_clicks = []
