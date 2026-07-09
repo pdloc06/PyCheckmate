@@ -333,13 +333,13 @@ def draw_promotion_menu(screen: pg.Surface, move: chess_engine.Move, board_flipp
     color = 'w' if move.piece_moved[0] == 'w' else 'b'
     menu_bg_rect, shadow_rect, menu_rects = get_promotion_menu_rects(move, board_flipped)
 
-    # 1. Draw Drop Shadow (Fake blur using semi-transparent black surface)
+    # Draw Drop Shadow (Fake blur using semi-transparent black surface)
     shadow_surface = pg.Surface((shadow_rect.width, shadow_rect.height), pg.SRCALPHA)
     # Using pg.draw.rect to round the shadow (border_radius=5 sync with the background)
     pg.draw.rect(shadow_surface, (0, 0, 0, 80), shadow_surface.get_rect(), border_radius=5)
     screen.blit(shadow_surface, shadow_rect.topleft)
 
-    # 2. Draw Menu Background (Matches the move log panel for consistency)
+    # Draw Menu Background (Matches the move log panel for consistency)
     bg_color = pg.Color('#3c3a38')
     pg.draw.rect(screen, bg_color, menu_bg_rect, border_radius=5)
 
@@ -350,7 +350,7 @@ def draw_promotion_menu(screen: pg.Surface, move: chess_engine.Move, board_flipp
     end_draw_row = 7 - move.end_row if board_flipped else move.end_row
     direction = 1 if end_draw_row < 4 else -1
 
-    # 3. Draw Pieces and Cancel Button
+    # Draw Pieces and Cancel Button
     for rect, option in menu_rects:
         if option == 'x':
             # Draw a subtle separator line above or below the 'x' button based on direction
@@ -592,7 +592,7 @@ def draw_move_log(
 
         num_str, w_move, b_move = move_texts[i]
 
-        # 1. Draw alternating row background colors (Zebra striping)
+        # Draw alternating row background colors (Zebra striping)
         row_color = pg.Color('#2b2927') if i % 2 == 0 else pg.Color('#262421')
         row_rect = pg.Rect(BOARD_WIDTH, text_y, MOVE_LOG_PANEL_WIDTH, item_height)
         pg.draw.rect(screen, row_color, row_rect)
@@ -608,7 +608,7 @@ def draw_move_log(
         num_surface = font.render(num_str, True, pg.Color('#989795'))
         screen.blit(num_surface, (num_x, text_offset_y))
 
-        # 2. Draw White's move notation
+        # Draw White's move notation
         is_w_selected = (i * 2 == current_move_index)
         if is_w_selected:
             # Draw the selection box for the active move
@@ -621,7 +621,7 @@ def draw_move_log(
         w_surface = font.render(w_move, True, w_color)
         screen.blit(w_surface, (w_x, text_offset_y))
 
-        # 3. Draw Black's move notation
+        # Draw Black's move notation
         if b_move:
             is_b_selected = (i * 2 + 1 == current_move_index)
             if is_b_selected:

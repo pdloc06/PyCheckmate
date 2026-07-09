@@ -119,7 +119,13 @@ class GameState:
     def get_board_state_string(self) -> str:
         """
         Generate a unique string hash of the current board state configuration.
+
         Captures piece arrangements, en-passant squares, castling rights, and current turn.
+
+        Returns
+        -------
+        str
+            A unique string representing the exact mathematical state of the board.
         """
         board_str = "".join(["".join(row) for row in self.board])
         ep_str = str(self.enpassant_possible)
@@ -353,16 +359,154 @@ class GameState:
                     friendly_pieces.remove((last_move.end_row, last_move.end_col + 1))
                     friendly_pieces.add((last_move.end_row, last_move.end_col - 2))
 
-    def make_ai_move(self, move: 'Move') -> None:
+    def make_ai_move(self, move_tuple: tuple) -> tuple:
         """
-        Dedicated move function for the AI engine (placeholder).
+        Execute a lightweight move specifically optimized for AI search trees.
+        Avoids object instantiation and string evaluation to prevent GC pauses.
 
         Parameters
         ----------
-        move : Move
-            The designated AI move to execute.
+        move_tuple : tuple
+            Format: (start_row, start_col, end_row, end_col, move_type, promotion_piece)
+            move_type mapping: 0=Normal, 1=Castle, 2=En Passant, 3=Promotion
+
+        Returns
+        -------
+        tuple
+            An undo package containing raw data to revert the state later.
+            Format: (captured_piece, old_enpassant, old_castle_rights_tuple)
         """
-        pass
+        start_row, start_col, end_row, end_col, move_type, promo_piece = move_tuple
+
+        piece_moved = self.board[start_row][start_col]
+        captured_piece = self.board[end_row][end_col]
+
+        # Pack castle rights into a simple boolean tuple to avoid object creation
+        old_castle_rights = (
+            self.white_castle_king_side,
+            self.white_castle_queen_side,
+            self.black_castle_king_side,
+            self.black_castle_queen_side
+        )
+        old_enpassant = self.enpassant_possible
+
+        # Update primary board state
+        self.board[start_row][start_col] = '--'
+        self.board[end_row][end_col] = piece_moved
+
+        # Update King locations
+        if piece_moved == 'wK':
+            self.white_king_location = (end_row, end_col)
+            self.white_castle_king_side = False
+            self.white_castle_queen_side = False
+        elif piece_moved == 'bK':
+            self.black_king_location = (end_row, end_col)
+            self.black_castle_king_side = False
+            self.black_castle_queen_side = False
+
+        # Handle specific move mechanics
+        if move_type == 1:  # Castle
+            if end_col - start_col == 2:  # King side
+                self.board[end_row][end_col - 1] = self.board[end_row][end_col + 1]
+                self.board[end_row][end_col + 1] = '--'
+            else:  # Queen side
+                self.board[end_row][end_col + 1] = self.board[end_row][end_col - 2]
+                self.board[end_row][end_col - 2] = '--'
+
+        elif move_type == 2:  # En Passant
+            self.board[start_row][end_col] = '--'
+            captured_piece = 'bP' if piece_moved == 'wP' else 'wP'
+
+        elif move_type == 3:  # Promotion
+            # Use string concatenation directly or map to predefined pieces for extra speed
+            self.board[end_row][end_col] = piece_moved[0] + promo_piece
+
+        # Update En Passant target square
+        if piece_moved[1] == 'P' and abs(start_row - end_row) == 2:
+            self.enpassant_possible = ((start_row + end_row) // 2, end_col)
+        else:
+            self.enpassant_possible = ()
+
+        # Revoke Castling Rights if rooks are moved or captured
+        if piece_moved[1] == 'R':
+            if start_row == 7:
+                if start_col == 0:
+                    self.white_castle_queen_side = False
+                elif start_col == 7:
+                    self.white_castle_king_side = False
+            elif start_row == 0:
+                if start_col == 0:
+                    self.black_castle_queen_side = False
+                elif start_col == 7:
+                    self.black_castle_king_side = False
+
+        if captured_piece != '--' and captured_piece[1] == 'R':
+            if end_row == 7:
+                if end_col == 0:
+                    self.white_castle_queen_side = False
+                elif end_col == 7:
+                    self.white_castle_king_side = False
+            elif end_row == 0:
+                if end_col == 0:
+                    self.black_castle_queen_side = False
+                elif end_col == 7:
+                    self.black_castle_king_side = False
+
+        self.white_to_move = not self.white_to_move
+
+        return captured_piece, old_enpassant, old_castle_rights
+
+    def unmake_ai_move(self, move_tuple: tuple, undo_package: tuple) -> None:
+        """
+        Reverse the state changes made by make_ai_move using the undo package.
+        Operates entirely on primitives for maximum performance.
+
+        Parameters
+        ----------
+        move_tuple : tuple
+            The exact move tuple executed previously.
+        undo_package : tuple
+            The restoration data returned by make_ai_move.
+        """
+        start_row, start_col, end_row, end_col, move_type, promo_piece = move_tuple
+        captured_piece, old_enpassant, old_castle_rights = undo_package
+
+        self.white_to_move = not self.white_to_move
+        piece_moved = self.board[end_row][end_col]
+
+        # Restore the piece to its starting square
+        if move_type == 3:  # Promotion (revert to Pawn)
+            piece_moved = piece_moved[0] + 'P'
+        self.board[start_row][start_col] = piece_moved
+
+        # Restore the captured piece
+        if move_type == 2:  # En Passant
+            self.board[end_row][end_col] = '--'
+            self.board[start_row][end_col] = captured_piece
+        else:
+            self.board[end_row][end_col] = captured_piece
+
+        # Undo Rook movement for Castling
+        if move_type == 1:
+            if end_col - start_col == 2:  # King side
+                self.board[end_row][end_col + 1] = self.board[end_row][end_col - 1]
+                self.board[end_row][end_col - 1] = '--'
+            else:  # Queen side
+                self.board[end_row][end_col - 2] = self.board[end_row][end_col + 1]
+                self.board[end_row][end_col + 1] = '--'
+
+        # Restore King tracking
+        if piece_moved == 'wK':
+            self.white_king_location = (start_row, start_col)
+        elif piece_moved == 'bK':
+            self.black_king_location = (start_row, start_col)
+
+        # Restore En Passant and Castling Rights precisely
+        self.enpassant_possible = old_enpassant
+        (self.white_castle_king_side,
+         self.white_castle_queen_side,
+         self.black_castle_king_side,
+         self.black_castle_queen_side) = old_castle_rights
 
     def get_valid_moves(self, for_ai: bool = False) -> list['Move']:
         """
@@ -698,6 +842,7 @@ class GameState:
     def get_king_moves(self, row: int, col: int, possible_moves: list['Move']) -> None:
         """
         Get all pseudo-legal normal moves for a king at the specified location.
+        Uses optimized is_square_attacked to validate safe squares.
 
         Parameters
         ----------
@@ -710,29 +855,18 @@ class GameState:
         """
         row_moves = (-1, -1, -1, 0, 0, 1, 1, 1)
         col_moves = (-1, 0, 1, -1, 1, -1, 0, 1)
+
         for i in range(8):
             end_row = row + row_moves[i]
             end_col = col + col_moves[i]
             if self.is_on_board(end_row, end_col):
                 end_piece = self.board[end_row][end_col]
                 if end_piece == '--' or end_piece[0] == self.enemy_color:
-                    # Test move validity by temporarily simulating the step
-                    if self.friendly_color == 'w':
-                        self.white_king_location = (end_row, end_col)
-                    else:
-                        self.black_king_location = (end_row, end_col)
-
-                    in_check, _, _ = self.check_pins_checks()
-                    if not in_check:
+                    # Validate if the destination square is safe directly
+                    if not self.is_square_attacked(end_row, end_col):
                         possible_moves.append(
                             Move.normal((row, col), (end_row, end_col), self.board)
                         )
-
-                    # Revert simulation
-                    if self.friendly_color == 'w':
-                        self.white_king_location = (row, col)
-                    else:
-                        self.black_king_location = (row, col)
 
     def get_castle_moves(self, row: int, col: int, possible_moves: list['Move']) -> None:
         """
@@ -755,7 +889,7 @@ class GameState:
                 and self.board[7][6] == '--'
                 and self.board[7][7] == 'wR'
             ):
-                if self._squares_safe_for_castle([(7, 4), (7, 5), (7, 6)], 'w'):
+                if self._squares_safe_for_castle([(7, 4), (7, 5), (7, 6)]):
                     possible_moves.append(Move.castle((7, 4), (7, 6), self.board))
             if (  # White Queen side castling
                 (row, col) == self.WHITE_KING_HOME_SQUARE
@@ -765,7 +899,7 @@ class GameState:
                 and self.board[7][3] == '--'
                 and self.board[7][0] == 'wR'
             ):
-                if self._squares_safe_for_castle([(7, 4), (7, 3), (7, 2)], 'w'):
+                if self._squares_safe_for_castle([(7, 4), (7, 3), (7, 2)]):
                     possible_moves.append(Move.castle((7, 4), (7, 2), self.board))
         else:
             if (  # Black King side castling
@@ -775,7 +909,7 @@ class GameState:
                 and self.board[0][6] == '--'
                 and self.board[0][7] == 'bR'
             ):
-                if self._squares_safe_for_castle([(0, 4), (0, 5), (0, 6)], 'b'):
+                if self._squares_safe_for_castle([(0, 4), (0, 5), (0, 6)]):
                     possible_moves.append(Move.castle((0, 4), (0, 6), self.board))
             if (  # Black Queen side castling
                 (row, col) == self.BLACK_KING_HOME_SQUARE
@@ -785,47 +919,27 @@ class GameState:
                 and self.board[0][3] == '--'
                 and self.board[0][0] == 'bR'
             ):
-                if self._squares_safe_for_castle([(0, 4), (0, 3), (0, 2)], 'b'):
+                if self._squares_safe_for_castle([(0, 4), (0, 3), (0, 2)]):
                     possible_moves.append(Move.castle((0, 4), (0, 2), self.board))
 
-    def _squares_safe_for_castle(self, squares: list[tuple[int, int]], king_color: str) -> bool:
+    def _squares_safe_for_castle(self, squares: list[tuple[int, int]]) -> bool:
         """
         Check if castling squares are free from enemy attacks.
-
-        Temporarily places the king on intermediate squares and checks for checks.
+        Utilizes the optimized is_square_attacked method without mutating king location.
 
         Parameters
         ----------
         squares : list of tuple of int
             The list of coordinate tuples the king moves through.
-        king_color : str
-            The color character of the king ('w' or 'b').
 
         Returns
         -------
         bool
             True if all squares are safe, False otherwise.
         """
-        original_king_location = self.white_king_location if king_color == 'w' else self.black_king_location
         for square in squares:
-            if king_color == 'w':
-                self.white_king_location = square
-            else:
-                self.black_king_location = square
-            in_check, _, _ = self.check_pins_checks()
-            if in_check:
-                # Revert immediately upon failure
-                if king_color == 'w':
-                    self.white_king_location = original_king_location
-                else:
-                    self.black_king_location = original_king_location
+            if self.is_square_attacked(square[0], square[1]):
                 return False
-
-        # Revert king back to starting square
-        if king_color == 'w':
-            self.white_king_location = original_king_location
-        else:
-            self.black_king_location = original_king_location
         return True
 
     def check_pins_checks(self) -> tuple[
@@ -930,6 +1044,81 @@ class GameState:
                     break
 
         return in_check, pins, checks
+
+    def is_square_attacked(self, row: int, col: int) -> bool:
+        """
+        Determine if a specific square is under attack by any enemy piece.
+        Optimized for king move generation to avoid full pin/check calculations.
+
+        Parameters
+        ----------
+        row : int
+            The row index of the square to check.
+        col : int
+            The column index of the square to check.
+
+        Returns
+        -------
+        bool
+            True if the square is attacked by an enemy piece, False otherwise.
+        """
+        enemy_color = 'b' if self.white_to_move else 'w'
+        friendly_color = 'w' if self.white_to_move else 'b'
+
+        directions = (
+            (-1, 0), (0, -1), (1, 0), (0, 1),  # Rook and Queen orthogonal vectors
+            (-1, -1), (-1, 1), (1, -1), (1, 1)  # Bishop and Queen diagonal vectors
+        )
+
+        # Check outward for Rooks, Bishops, Queens, Pawns, and King
+        for i in range(len(directions)):
+            d = directions[i]
+            for j in range(1, 8):
+                end_row = row + d[0] * j
+                end_col = col + d[1] * j
+                if self.is_on_board(end_row, end_col):
+                    end_piece = self.board[end_row][end_col]
+
+                    # Ignore our own King to allow ray casting through its original position
+                    if end_piece[0] == friendly_color and end_piece[1] != 'K':
+                        break
+                    elif end_piece[0] == enemy_color:
+                        enemy_piece_type = end_piece[1]
+
+                        # Check orthogonal attacks (Rook/Queen)
+                        if 0 <= i <= 3 and enemy_piece_type in ('R', 'Q'):
+                            return True
+                        # Check diagonal attacks (Bishop/Queen)
+                        elif 4 <= i <= 7 and enemy_piece_type in ('B', 'Q'):
+                            return True
+                        # Check Pawn attacks (Distance of 1, specific diagonals)
+                        elif j == 1 and enemy_piece_type == 'P':
+                            if enemy_color == 'b' and 4 <= i <= 5:
+                                return True
+                            elif enemy_color == 'w' and 6 <= i <= 7:
+                                return True
+                        # Check enemy King attacks (Distance of 1 in any direction)
+                        elif j == 1 and enemy_piece_type == 'K':
+                            return True
+                        else:
+                            break  # Other enemy piece blocking the ray
+                else:
+                    break
+
+        # Check Knight attacks
+        knight_moves = (
+            (-2, -1), (-2, 1), (-1, -2), (-1, 2),
+            (1, -2), (1, 2), (2, -1), (2, 1)
+        )
+        for m in knight_moves:
+            end_row = row + m[0]
+            end_col = col + m[1]
+            if self.is_on_board(end_row, end_col):
+                end_piece = self.board[end_row][end_col]
+                if end_piece[0] == enemy_color and end_piece[1] == 'N':
+                    return True
+
+        return False
 
     def update_castle_rights(self, move: 'Move', record: bool = True) -> None:
         """
@@ -1071,16 +1260,65 @@ class Move:
 
     @classmethod
     def normal(cls, start_sq: tuple[int, int], end_sq: tuple[int, int], board: list[list[str]]) -> 'Move':
-        """Construct a standard move."""
+        """
+        Construct a standard normal move.
+
+        Parameters
+        ----------
+        start_sq : tuple of int
+            The starting coordinate (row, col).
+        end_sq : tuple of int
+            The destination coordinate (row, col).
+        board : list of list of str
+            The current board array.
+
+        Returns
+        -------
+        Move
+            A new Move instance classified as NORMAL.
+        """
         return cls(start_sq, end_sq, board, move_type=cls.NORMAL)
 
     @classmethod
     def en_passant(cls, start_sq: tuple[int, int], end_sq: tuple[int, int], board: list[list[str]]) -> 'Move':
-        """Construct an en-passant capture move."""
+        """
+        Construct an en-passant capture move.
+
+        Parameters
+        ----------
+        start_sq : tuple of int
+            The starting coordinate (row, col).
+        end_sq : tuple of int
+            The destination coordinate (row, col).
+        board : list of list of str
+            The current board array.
+
+        Returns
+        -------
+        Move
+            A new Move instance classified as EN_PASSANT.
+        """
         return cls(start_sq, end_sq, board, move_type=cls.EN_PASSANT)
 
     @classmethod
     def castle(cls, start_sq: tuple[int, int], end_sq: tuple[int, int], board: list[list[str]]) -> 'Move':
+        """
+        Construct an castle move.
+
+        Parameters
+        ----------
+        start_sq : tuple of int
+            The starting coordinate (row, col).
+        end_sq : tuple of int
+            The destination coordinate (row, col).
+        board : list of list of str
+            The current board array.
+
+        Returns
+        -------
+        Move
+            A new Move instance classified as CASTLE.
+        """
         """Construct a castling move."""
         return cls(start_sq, end_sq, board, move_type=cls.CASTLE)
 
@@ -1092,7 +1330,27 @@ class Move:
             board: list[list[str]],
             promotion_piece: str = 'Q'
     ) -> 'Move':
-        """Construct a pawn promotion move."""
+        """
+        Construct a pawn promotion move.
+
+        Parameters
+        ----------
+        start_sq : tuple of int
+            The starting coordinate (row, col) of the promoting pawn.
+        end_sq : tuple of int
+            The destination coordinate (row, col) on the promotion rank.
+        board : list of list of str
+            The current 2D board array configuration.
+        promotion_piece : str, optional
+            The target chess piece character designated for the promotion
+            (typically 'Q', 'R', 'B', or 'N'). Default is 'Q'.
+
+        Returns
+        -------
+        Move
+            A new Move instance explicitly classified as PROMOTION with the
+            designated target piece type.
+        """
         return cls(
             start_sq,
             end_sq,
@@ -1128,17 +1386,38 @@ class Move:
 
     @property
     def is_pawn_promotion(self) -> bool:
-        """Check if the move is a promotion."""
+        """
+        Check if the move involves a pawn reaching the furthest rank and promoting.
+
+        Returns
+        -------
+        bool
+            True if the internal move type matches PROMOTION, False otherwise.
+        """
         return self.move_type == self.PROMOTION
 
     @property
     def is_enpassant_move(self) -> bool:
-        """Check if the move is an en-passant capture."""
+        """
+        Check if the move is a special en-passant diagonal pawn capture.
+
+        Returns
+        -------
+        bool
+            True if the internal move type matches EN_PASSANT, False otherwise.
+        """
         return self.move_type == self.EN_PASSANT
 
     @property
     def is_castle_move(self) -> bool:
-        """Check if the move is a castle."""
+        """
+        Check if the move is a castling maneuver involving both the king and a rook.
+
+        Returns
+        -------
+        bool
+            True if the internal move type matches CASTLE, False otherwise.
+        """
         return self.move_type == self.CASTLE
 
     def get_file_rank(self, row: int, col: int) -> str:
@@ -1174,7 +1453,7 @@ class Move:
             notation = 'O-O' if self.end_col > self.start_col else 'O-O-O'
         else:
             notation = ''
-            # Use standard piece letters instead of unicode symbols
+
             if self.piece_moved[1] != 'P':
                 notation = self.piece_moved[1]
                 # Append file or rank modifier if ambiguous targeting is found
