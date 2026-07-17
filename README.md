@@ -19,28 +19,30 @@ can be read as a walkthrough of how a chess engine works.
 
 ## Requirements
 
-- Python 3.10 or newer (developed on 3.14)
-- The packages in `requirements.txt` (currently just [pygame-ce](https://pyga.me/))
+- [uv](https://docs.astral.sh/uv/) — the only tool you need to install
+  yourself; it manages the Python interpreter (3.14, per `.python-version`)
+  and the dependencies (just [pygame-ce](https://pyga.me/) at runtime) from
+  the committed lockfile.
 
 ## Setup
 
 ```bash
-# 1. Clone the repository
+# 1. Install uv (see https://docs.astral.sh/uv/getting-started/installation/)
+brew install uv                  # macOS; other platforms:
+                                 # curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Clone the repository
 git clone https://github.com/pdloc06/PyCheckmate.git
 cd PyCheckmate
 
-# 2. Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-# 3. Install the dependencies
-pip install -r requirements.txt
+# 3. Create the environment and install everything from uv.lock
+uv sync
 ```
 
 ## Running the game
 
 ```bash
-python main.py
+uv run main.py
 ```
 
 Pick your opponent (computer or another person) from the menu, then:
@@ -55,13 +57,35 @@ Pick your opponent (computer or another person) from the menu, then:
 
 Player 1 always plays the color shown at the bottom of the board.
 
+## Faster AI with PyPy
+
+The engine (`chess_engine.py`, `move_finder.py`, `uci.py`) is pure standard
+library, so it can run under [PyPy](https://pypy.org/), whose JIT makes the
+search about **2× faster** (more at longer time controls). One command sets
+it up:
+
+```bash
+uv python install pypy3.11
+```
+
+That's it — the game detects PyPy automatically and hosts the AI in a PyPy
+subprocess (see `uci_client.py`), while the GUI itself stays on CPython for
+pygame. Without PyPy the AI simply searches in-process; set
+`AI_USE_UCI_ENGINE = False` in `config.py` to force that. Compare
+interpreters yourself with the included benchmark:
+
+```bash
+uv run --no-project bench.py                  # CPython
+uv run --no-project -p pypy3.11 bench.py      # PyPy
+```
+
 ## Running the engine over UCI
 
 The engine speaks a minimal subset of the UCI protocol, enough to plug into
 standard chess GUIs and bridges:
 
 ```bash
-python uci.py
+uv run --no-project uci.py                    # or -p pypy3.11 for speed
 ```
 
 Example session: `position startpos moves e2e4`, then `go depth 4`, and the
@@ -69,17 +93,11 @@ engine answers with `bestmove <move>`.
 
 ## Development
 
-Install the dev tools (pytest and mypy) on top of the runtime dependencies:
+`uv sync` already installs the dev tools (pytest and mypy). Run the checks:
 
 ```bash
-pip install -r requirements-dev.txt
-```
-
-Run the checks:
-
-```bash
-pytest tests/ -q                 # Test suite (move generation, perft, search, FEN/UCI)
-python -m mypy chess_engine.py move_finder.py config.py main.py uci.py gui/ tests/
+uv run pytest tests/ -q          # Test suite (move generation, perft, search, FEN/UCI)
+uv run mypy chess_engine.py move_finder.py config.py main.py uci.py uci_client.py bench.py gui/ tests/
 ```
 
 ## Project layout
@@ -91,6 +109,8 @@ python -m mypy chess_engine.py move_finder.py config.py main.py uci.py gui/ test
 | `main.py` | Game driver: menu, event loop, turn handling, threaded AI |
 | `gui/` | Rendering: board graphics, animations, menus, panels |
 | `uci.py` | UCI protocol adapter for running the engine outside the GUI |
+| `uci_client.py` | Spawns the engine as a (PyPy) subprocess and talks UCI to it |
+| `bench.py` | Engine speed benchmark for comparing interpreters |
 | `config.py` | Layout, theme, and AI settings |
 | `pieces/` | Piece image assets |
 | `tests/` | Pytest suite |
