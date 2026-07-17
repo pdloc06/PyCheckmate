@@ -94,7 +94,11 @@ In rough order of value per effort:
 1. **Opening book**: lichess-bot can use a polyglot `.bin` book on the bridge
    side (zero engine work) — enable it to avoid burning clock in the opening.
 2. **Search speed**: Python is the ceiling. Cheap wins first: run under
-   `pypy3` (often 5-20x on this kind of code), then profile
+   `pypy3` — DONE: `uv python install pypy3.11` provides the interpreter,
+   `uv run --no-project -p pypy3.11 uci.py` hosts the engine under it, and
+   the GUI auto-uses it through `uci_client.py` (measured ~2x on `bench.py`;
+   the gain grows with longer time controls as the JIT stays warm). Point
+   lichess-bot's engine command at the PyPy invocation above. Next: profile
    (`python -m cProfile -s tottime`) — `get_valid_moves` dominates; a
    captures-only generator for quiescence is the single best structural win.
 3. **Persistent transposition table** across moves of the same game (today
