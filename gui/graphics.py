@@ -38,7 +38,10 @@ def board_to_screen(row: int, col: int, board_flipped: bool) -> tuple[int, int]:
     """
     draw_row = (7 - row) if board_flipped else row
     draw_col = (7 - col) if board_flipped else col
-    return draw_col * config.SQ_SIZE, config.BOARD_TOP + draw_row * config.SQ_SIZE
+    return (
+        config.BOARD_LEFT + draw_col * config.SQ_SIZE,
+        config.BOARD_TOP + draw_row * config.SQ_SIZE,
+    )
 
 
 def screen_to_board(x: int, y: int, board_flipped: bool) -> tuple[int, int] | None:
@@ -60,12 +63,12 @@ def screen_to_board(x: int, y: int, board_flipped: bool) -> tuple[int, int] | No
         The logical (row, col) of the clicked square, or None when the click
         landed outside the board area (player bars or move log panel).
     """
-    if not (0 <= x < config.BOARD_WIDTH):
+    if not (config.BOARD_LEFT <= x < config.BOARD_LEFT + config.BOARD_WIDTH):
         return None
     if not (config.BOARD_TOP <= y < config.BOARD_TOP + config.BOARD_HEIGHT):
         return None
 
-    clicked_col = x // config.SQ_SIZE
+    clicked_col = (x - config.BOARD_LEFT) // config.SQ_SIZE
     clicked_row = (y - config.BOARD_TOP) // config.SQ_SIZE
 
     row = 7 - clicked_row if board_flipped else clicked_row
@@ -73,19 +76,22 @@ def screen_to_board(x: int, y: int, board_flipped: bool) -> tuple[int, int] | No
     return row, col
 
 
-def load_pieces_images(pieces_type: str = 'standard') -> None:
+def load_pieces_images(pieces_type: str | None = None) -> None:
     """
     Initialize the global dictionary of images and load piece assets.
 
     Parameters
     ----------
     pieces_type : str, optional
-        The subdirectory name for the image set to load. Default is 'standard'.
+        The subdirectory name for the image set to load. Defaults to the
+        currently selected set in `config.PIECE_SET`.
 
     Returns
     -------
     None
     """
+    if pieces_type is None:
+        pieces_type = config.PIECE_SET
     pieces = ['bB', 'bK', 'bN', 'bP', 'bQ', 'bR', 'wB', 'wK', 'wN', 'wP', 'wQ', 'wR']
     for piece in pieces:
         img_path = Path('pieces') / pieces_type / f'{piece}.png'
@@ -98,6 +104,64 @@ def load_pieces_images(pieces_type: str = 'standard') -> None:
             )
         else:
             print(f"Image not found for piece: {piece}")
+    config.PIECE_SET = pieces_type
+
+
+def list_piece_sets() -> list[str]:
+    """
+    Discover the piece image sets available under the pieces/ directory.
+
+    A directory qualifies as a set when it holds at least a white king image,
+    which filters out stray folders and OS metadata.
+
+    Returns
+    -------
+    list of str
+        The set names, sorted alphabetically (e.g. ['neo', 'standard']).
+    """
+    pieces_dir = Path('pieces')
+    if not pieces_dir.is_dir():
+        return [config.PIECE_SET]
+    sets = sorted(
+        entry.name for entry in pieces_dir.iterdir()
+        if entry.is_dir() and (entry / 'wK.png').exists()
+    )
+    return sets or [config.PIECE_SET]
+
+
+# Every quality tag the review feature can produce, plus the end-of-game
+# badges drawn on the kings. Values are the evaluate_icons/ file stems.
+EVAL_ICON_NAMES: tuple[str, ...] = (
+    'brilliant', 'great_find', 'best', 'excellent', 'good', 'book',
+    'inaccuracy', 'mistake', 'missed_win', 'blunder', 'forced',
+    'checkmate_white', 'checkmate_black', 'draw_white', 'draw_black',
+    'winner',
+)
+
+
+def load_eval_icons() -> None:
+    """
+    Load and pre-scale the move-quality badge images used by game review.
+
+    Each icon is cached twice: a small copy for the move-log rows and a
+    larger one for the badge drawn on the moved piece's square.
+
+    Returns
+    -------
+    None
+    """
+    for name in EVAL_ICON_NAMES:
+        icon_path = Path('evaluate_icons') / f'{name}_128x.png'
+        if not icon_path.exists():
+            print(f"Icon not found: {icon_path}")
+            continue
+        raw_icon = pg.image.load(icon_path)
+        config.EVAL_ICONS_LOG[name] = pg.transform.smoothscale(
+            raw_icon, (config.EVAL_ICON_LOG_SIZE, config.EVAL_ICON_LOG_SIZE)
+        )
+        config.EVAL_ICONS_BOARD[name] = pg.transform.smoothscale(
+            raw_icon, (config.EVAL_ICON_BOARD_SIZE, config.EVAL_ICON_BOARD_SIZE)
+        )
 
 def cache_coordinate_fonts(coord_font: pg.font.Font) -> None:
     """

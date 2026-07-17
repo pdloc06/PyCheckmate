@@ -15,6 +15,13 @@ MOVE_LOG_PANEL_WIDTH = 250
 PLAYER_BAR_HEIGHT = 40
 BOARD_TOP = PLAYER_BAR_HEIGHT  # Vertical pixel offset where the board starts
 
+# Horizontal pixel offset where the board starts. Zero during normal play;
+# the review screen sets it to EVAL_BAR_WIDTH (and resizes the window) so the
+# evaluation bar gets a gutter on the left. Mutable at runtime on purpose —
+# board_to_screen()/screen_to_board() read it every call.
+BOARD_LEFT = 0
+EVAL_BAR_WIDTH = 36
+
 # Total window dimensions
 WIDTH = BOARD_WIDTH + MOVE_LOG_PANEL_WIDTH
 HEIGHT = BOARD_HEIGHT + 2 * PLAYER_BAR_HEIGHT
@@ -31,6 +38,12 @@ ANIMATION_FPS = 60
 # AI search settings
 AI_MAX_DEPTH = 4       # Maximum iterative-deepening depth for the move finder
 AI_TIME_LIMIT = 5.0    # Soft time limit (seconds) per AI move
+
+# Game-review (analysis) settings: every position of the game gets its own
+# search, so these are much shallower than the live-play limits — a 40-move
+# game already means ~80 searches
+REVIEW_MAX_DEPTH = 3
+REVIEW_TIME_LIMIT = 0.4
 
 # Time controls offered on the pre-game menu, keyed by display name to
 # (initial_seconds, increment_seconds). `None` initial seconds means the
@@ -50,11 +63,22 @@ GAME_MODES: dict[str, tuple[int | None, int]] = {
 # search when unavailable, so the game works either way.
 AI_USE_UCI_ENGINE = True
 
+# Piece image set: subdirectory of pieces/ the piece graphics load from.
+# Changed at runtime by the main menu's piece-set selector.
+PIECE_SET = 'standard'
+
 # Global caches
 IMAGES: dict[str, pg.Surface] = {}  # Storing chess pieces' images
 SMALL_IMAGES: dict[str, pg.Surface] = {}  # Downscaled piece images for the captured-material row
 CAPTURED_ICON_SIZE = 16
 COORD_SURFACES: dict[str, dict[str, pg.Surface]] = {'white': {}, 'grey': {}}  # Storing pre-rendered coordinate surfaces
+
+# Move-quality badge images (evaluate_icons/), pre-scaled to two sizes:
+# small for the move-log rows, large for the badge on the moved piece
+EVAL_ICONS_LOG: dict[str, pg.Surface] = {}
+EVAL_ICONS_BOARD: dict[str, pg.Surface] = {}
+EVAL_ICON_LOG_SIZE = 16
+EVAL_ICON_BOARD_SIZE = 24
 
 # Standard board colors
 board_colors: list[pg.Color] = [pg.Color('white'), pg.Color('grey')]

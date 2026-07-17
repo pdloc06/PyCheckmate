@@ -13,6 +13,19 @@ can be read as a walkthrough of how a chess engine works.
   Zobrist-keyed transposition table, quiescence search, MVV-LVA / killer /
   history move ordering, and null-move pruning.
 - Move log panel with algebraic notation and click-to-browse game history.
+- **Game review** (chess.com style): after a game ends, a **Review Game**
+  button replays it with an evaluation bar, a move list where every move is
+  graded (brilliant / great / best / excellent / good / book / inaccuracy /
+  mistake / miss / blunder / forced, with icons from `evaluate_icons/`), a
+  quality badge on the moved piece, a best-move arrow, and an accuracy score
+  for each player.
+- **Game analysis** from the main menu: paste or type a FEN position or a
+  full PGN game and get the same review experience for any game.
+- **Variations** while reviewing: play a move that differs from the game and
+  the analysis continues down your side line; a "Back to game" strip returns
+  you to the real game at any time.
+- Selectable piece sets — drop a new folder of piece images into `pieces/`
+  and cycle through the sets from the main menu.
 - Board flipping, move animations, and player info bars.
 - A minimal UCI adapter (`engine/uci.py`) so the engine can talk to standard chess
   tooling — see `LICHESS_BOT_PLAN.md` for the Lichess bot roadmap.
@@ -54,8 +67,15 @@ Pick your opponent (computer or another person) from the menu, then:
 | Reset the game | `Ctrl`/`Cmd` + `R`, or the **Restart Game** button |
 | Flip the board | The **Flip** button (in a computer game this also switches which color you play) |
 | Browse move history | Click a move in the log, or the `<` / `>` buttons |
+| Review the finished game | The **Review Game** button (appears once the game ends) |
 
 Player 1 always plays the color shown at the bottom of the board.
+
+To analyse a game that wasn't played in the program, pick **Game Analysis**
+from the main menu and paste (`Ctrl`/`Cmd` + `V`) or type a FEN position or a
+PGN game. While reviewing, step through moves with the `<` / `>` buttons or by
+clicking the move list — and play any move on the board to explore a
+variation.
 
 ## Faster AI with PyPy
 
@@ -109,9 +129,13 @@ uv run mypy main.py config.py engine/ gui/ tests/
 | `engine/` | The headless engine package (pure stdlib, PyPy-compatible) |
 | `engine/chess_engine.py` | Game state and rules: board, move generation, make/unmake, FEN, Zobrist hashing |
 | `engine/move_finder.py` | The AI search and evaluation |
+| `engine/analysis.py` | Game review: move grading, win-percent model, accuracy |
+| `engine/pgn.py` | PGN/SAN and FEN import for the analysis screen |
 | `engine/uci.py` | UCI protocol adapter for running the engine outside the GUI |
 | `engine/uci_client.py` | Spawns the engine as a (PyPy) subprocess and talks UCI to it |
 | `engine/bench.py` | Engine speed benchmark for comparing interpreters |
 | `gui/` | Rendering: board graphics, animations, menus, panels |
-| `pieces/` | Piece image assets |
+| `gui/review.py` | Review screen rendering: eval bar, graded move list, badges |
+| `pieces/` | Piece image assets (one subfolder per selectable piece set) |
+| `evaluate_icons/` | Move-quality icons used by the review screen |
 | `tests/` | Pytest suite |

@@ -14,7 +14,15 @@ from gui import graphics
 # rendering and the click hit-testing can never drift apart
 LOG_TOP_PADDING = 5
 LOG_LINE_SPACING = 6
-LOG_RESERVED_BOTTOM = 160  # Safe space reserved for the control buttons
+# Safe space reserved for the control buttons: taller once the game is over,
+# because that is when the "Review Game" button joins the panel
+LOG_RESERVED_BOTTOM = 160
+LOG_RESERVED_BOTTOM_REVIEW = 200
+
+
+def _log_reserved_bottom(show_review: bool) -> int:
+    """Pick the button-area height for the current game phase."""
+    return LOG_RESERVED_BOTTOM_REVIEW if show_review else LOG_RESERVED_BOTTOM
 
 # Standard chess point values (not the engine's centipawn tuning weights in
 # move_finder.PIECE_VALUES) used only to size the "+N" material lead badge
@@ -93,36 +101,60 @@ def format_clock(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def get_control_button_rects() -> tuple[pg.Rect, pg.Rect, pg.Rect, pg.Rect, pg.Rect]:
+def get_control_button_rects(
+    show_review: bool = False,
+) -> tuple[pg.Rect, pg.Rect, pg.Rect, pg.Rect, pg.Rect, pg.Rect]:
     """
     Calculate and return the bounding rectangles for all UI control buttons.
+
+    Parameters
+    ----------
+    show_review : bool, optional
+        True once the game has ended: the "Review Game" button appears and
+        the other buttons shift up to make room. While the game is running
+        the review rect is placed off-screen so it can never be clicked.
 
     Returns
     -------
     tuple
-        A tuple of five pygame.Rect objects: (menu_btn, prev_btn, next_btn, restart_btn, flip_btn).
+        A tuple of six pygame.Rect objects:
+        (menu_btn, review_btn, prev_btn, next_btn, restart_btn, flip_btn).
     """
-    menu_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 120, config.MOVE_LOG_PANEL_WIDTH - 20, 30)
+    if show_review:
+        menu_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 160, config.MOVE_LOG_PANEL_WIDTH - 20, 30)
+        review_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 120, config.MOVE_LOG_PANEL_WIDTH - 20, 30)
+    else:
+        menu_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 120, config.MOVE_LOG_PANEL_WIDTH - 20, 30)
+        review_btn = pg.Rect(-100, -100, 0, 0)  # Hidden: never drawn or hit
     prev_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 80, (config.MOVE_LOG_PANEL_WIDTH - 30) // 2, 30)
     next_btn = pg.Rect(config.BOARD_WIDTH + 20 + prev_btn.width, config.HEIGHT - 80, prev_btn.width, 30)
     restart_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 40, config.MOVE_LOG_PANEL_WIDTH - 70, 30)
     flip_btn = pg.Rect(config.BOARD_WIDTH + config.MOVE_LOG_PANEL_WIDTH - 50, config.HEIGHT - 40, 40, 30)
 
-    return menu_btn, prev_btn, next_btn, restart_btn, flip_btn
+    return menu_btn, review_btn, prev_btn, next_btn, restart_btn, flip_btn
 
 
-def get_menu_button_rects() -> tuple[pg.Rect, pg.Rect]:
+# Extra vertical space between the two "play" buttons and the Game Analysis
+# button, so the tools section reads as separate from the game modes
+MENU_SECTION_GAP = 34
+
+
+def get_menu_button_rects() -> tuple[pg.Rect, pg.Rect, pg.Rect]:
     """
     Calculate the bounding rectangles for the main menu mode buttons.
+
+    The two play buttons form one group; the Game Analysis button sits a
+    section gap below them (with a divider drawn in between).
 
     Returns
     -------
     tuple
-        A tuple of two pygame.Rect objects: (vs_ai_btn, two_players_btn).
+        A tuple of three pygame.Rect objects:
+        (vs_ai_btn, two_players_btn, analysis_btn).
     """
     btn_width, btn_height, gap = 280, 52, 18
     center_x = config.WIDTH // 2
-    first_y = config.HEIGHT // 2 - btn_height - gap // 2 + 30
+    first_y = config.HEIGHT // 2 - btn_height - gap // 2 + 10
 
     vs_ai_btn = pg.Rect(0, 0, btn_width, btn_height)
     vs_ai_btn.center = (center_x, first_y)
@@ -130,7 +162,25 @@ def get_menu_button_rects() -> tuple[pg.Rect, pg.Rect]:
     two_players_btn = pg.Rect(0, 0, btn_width, btn_height)
     two_players_btn.center = (center_x, first_y + btn_height + gap)
 
-    return vs_ai_btn, two_players_btn
+    analysis_btn = pg.Rect(0, 0, btn_width, btn_height)
+    analysis_btn.center = (center_x, first_y + 2 * (btn_height + gap) + MENU_SECTION_GAP)
+
+    return vs_ai_btn, two_players_btn, analysis_btn
+
+
+def get_piece_set_button_rect() -> pg.Rect:
+    """
+    Calculate the bounding rectangle for the piece-set selector button.
+
+    Returns
+    -------
+    pg.Rect
+        The button's rect, centered near the bottom of the main menu.
+    """
+    rect = pg.Rect(0, 0, 240, 40)
+    rect.centerx = config.WIDTH // 2
+    rect.bottom = config.HEIGHT - 24
+    return rect
 
 
 # Top of the button list, left fixed (rather than vertically centered on the
@@ -253,13 +303,26 @@ def draw_main_menu(
 
     # Title and subtitle block
     title_surf = title_font.render('PyCheckmate', True, config.THEME['text'])
-    screen.blit(title_surf, title_surf.get_rect(center=(config.WIDTH // 2, config.HEIGHT // 3 - 20)))
+    screen.blit(title_surf, title_surf.get_rect(center=(config.WIDTH // 2, config.HEIGHT // 3 - 40)))
 
     subtitle_surf = button_font.render('Choose your opponent', True, config.THEME['text_muted'])
-    screen.blit(subtitle_surf, subtitle_surf.get_rect(center=(config.WIDTH // 2, config.HEIGHT // 3 + 30)))
+    screen.blit(subtitle_surf, subtitle_surf.get_rect(center=(config.WIDTH // 2, config.HEIGHT // 3 + 10)))
 
-    vs_ai_btn, two_players_btn = get_menu_button_rects()
-    for rect, label in ((vs_ai_btn, 'Play vs Computer'), (two_players_btn, 'Two Players')):
+    vs_ai_btn, two_players_btn, analysis_btn = get_menu_button_rects()
+
+    # Divider between the play buttons and the analysis tool below them
+    divider_y = (two_players_btn.bottom + analysis_btn.top) // 2
+    pg.draw.line(
+        screen, config.THEME['border'],
+        (analysis_btn.left, divider_y), (analysis_btn.right, divider_y)
+    )
+
+    buttons = (
+        (vs_ai_btn, 'Play vs Computer'),
+        (two_players_btn, 'Two Players'),
+        (analysis_btn, 'Game Analysis'),
+    )
+    for rect, label in buttons:
         hovered = rect.collidepoint(mouse_pos)
         btn_color = config.THEME['button_hover'] if hovered else config.THEME['button']
         pg.draw.rect(screen, btn_color, rect, border_radius=8)
@@ -267,6 +330,28 @@ def draw_main_menu(
 
         text_surf = button_font.render(label, True, config.THEME['text'])
         screen.blit(text_surf, text_surf.get_rect(center=rect.center))
+
+    # Piece-set selector: cycles through the sets found under pieces/, with
+    # a live knight preview of the current set
+    piece_btn = get_piece_set_button_rect()
+    hovered = piece_btn.collidepoint(mouse_pos)
+    btn_color = config.THEME['button_hover'] if hovered else config.THEME['button']
+    pg.draw.rect(screen, btn_color, piece_btn, border_radius=8)
+    pg.draw.rect(screen, config.THEME['border'], piece_btn, 1, border_radius=8)
+
+    label_surf = button_font.render(
+        f'Pieces: {config.PIECE_SET.capitalize()}', True, config.THEME['text']
+    )
+    knight = config.IMAGES.get('wN')
+    if knight is not None:
+        preview = pg.transform.smoothscale(knight, (30, 30))
+        total_width = preview.get_width() + 8 + label_surf.get_width()
+        preview_x = piece_btn.centerx - total_width // 2
+        screen.blit(preview, (preview_x, piece_btn.centery - preview.get_height() // 2))
+        screen.blit(label_surf, (preview_x + preview.get_width() + 8,
+                                 piece_btn.centery - label_surf.get_height() // 2))
+    else:
+        screen.blit(label_surf, label_surf.get_rect(center=piece_btn.center))
 
 
 def draw_player_bars(
@@ -402,7 +487,8 @@ def draw_move_log(
     screen: pg.Surface,
     gs: chess_engine.GameState,
     font: pg.font.Font,
-    forced_result: str | None = None
+    forced_result: str | None = None,
+    show_review: bool = False,
 ) -> None:
     """
     Draw the move log interface containing notation history and system controls.
@@ -419,6 +505,9 @@ def draw_move_log(
         Pre-computed result string ("1-0"/"0-1") to show instead of checking
         `gs.is_checkmate`/`gs.is_stalemate`, used when the game ends on a
         clock flag rather than a rules-driven end state.
+    show_review : bool, optional
+        True once the game has ended, adding the "Review Game" button to the
+        control area (mirrors `get_control_button_rects`).
 
     Returns
     -------
@@ -438,7 +527,7 @@ def draw_move_log(
     item_height = font.get_height() + LOG_LINE_SPACING
 
     # Calculate maximum visible lines, leaving safe space for buttons
-    max_lines = (config.MOVE_LOG_PANEL_HEIGHT - LOG_RESERVED_BOTTOM) // item_height
+    max_lines = (config.MOVE_LOG_PANEL_HEIGHT - _log_reserved_bottom(show_review)) // item_height
     start_line = max(0, len(move_texts) - max_lines)
 
     # Get the index of the currently active half-move
@@ -504,12 +593,16 @@ def draw_move_log(
         end_surface = font.render(end_text, True, config.THEME['text_muted'])
         screen.blit(end_surface, (config.BOARD_WIDTH + 15, text_y))
 
-    # Control buttons layout
-    btn_color, text_color = config.THEME['button'], config.THEME['text']
-    menu_btn, prev_btn, next_btn, restart_btn, flip_btn = get_control_button_rects()
+    # Control buttons layout ("Review Game" only exists once the game ended)
+    menu_btn, review_btn, prev_btn, next_btn, restart_btn, flip_btn = \
+        get_control_button_rects(show_review)
 
+    btn_color, text_color = config.THEME['button'], config.THEME['text']
     buttons = [menu_btn, prev_btn, next_btn, restart_btn, flip_btn]
     labels = ["< Main Menu", "<", ">", "Restart Game", "Flip"]
+    if show_review:
+        buttons.insert(1, review_btn)
+        labels.insert(1, "Review Game")
     for btn, txt in zip(buttons, labels):
         pg.draw.rect(screen, btn_color, btn, border_radius=5)
         text_surf = font.render(txt, True, text_color)
@@ -519,7 +612,8 @@ def draw_move_log(
 def get_move_log_click_index(
     location: tuple[int, int],
     total_moves: int,
-    font: pg.font.Font
+    font: pg.font.Font,
+    show_review: bool = False,
 ) -> int | None:
     """
     Map a click inside the move-log panel to a half-move index.
@@ -535,6 +629,9 @@ def get_move_log_click_index(
         The current number of half-moves in the game log.
     font : pygame.font.Font
         The font used by the move log (determines line height).
+    show_review : bool, optional
+        Whether the log is currently drawn with the post-game button layout
+        (must match the `draw_move_log` call).
 
     Returns
     -------
@@ -542,12 +639,13 @@ def get_move_log_click_index(
         The 0-based half-move index the click points at, or None when the
         click was outside the notation list area.
     """
+    reserved_bottom = _log_reserved_bottom(show_review)
     y_offset = location[1] - LOG_TOP_PADDING
-    if not (0 < y_offset < config.MOVE_LOG_PANEL_HEIGHT - LOG_RESERVED_BOTTOM + 20):
+    if not (0 < y_offset < config.MOVE_LOG_PANEL_HEIGHT - reserved_bottom + 20):
         return None
 
     item_height = font.get_height() + LOG_LINE_SPACING
-    max_lines = (config.MOVE_LOG_PANEL_HEIGHT - LOG_RESERVED_BOTTOM) // item_height
+    max_lines = (config.MOVE_LOG_PANEL_HEIGHT - reserved_bottom) // item_height
     start_line = max(0, ((total_moves + 1) // 2) - max_lines)
 
     # Calculate target index including the scrolled offset; the right column
@@ -587,11 +685,13 @@ def get_promotion_menu_rects(
     direction = 1 if end_draw_row < 4 else -1
     rects = []
 
-    # Calculate piece bounding boxes (offset by the top player bar)
+    # Calculate piece bounding boxes (offset by the player bar and the
+    # board's left edge)
+    menu_x = config.BOARD_LEFT + draw_col * config.SQ_SIZE
     for i, p in enumerate(['Q', 'N', 'R', 'B']):
         row = end_draw_row + i * direction
         rect = pg.Rect(
-            draw_col * config.SQ_SIZE,
+            menu_x,
             config.BOARD_TOP + row * config.SQ_SIZE,
             config.SQ_SIZE, config.SQ_SIZE
         )
@@ -607,10 +707,10 @@ def get_promotion_menu_rects(
         x_y = config.BOARD_TOP + (end_draw_row - 3) * config.SQ_SIZE - x_height
         menu_y = x_y
 
-    rects.append((pg.Rect(draw_col * config.SQ_SIZE, x_y, config.SQ_SIZE, x_height), 'x'))
+    rects.append((pg.Rect(menu_x, x_y, config.SQ_SIZE, x_height), 'x'))
 
     # Background and shadow calculations
-    menu_bg_rect = pg.Rect(draw_col * config.SQ_SIZE, menu_y, config.SQ_SIZE, 4 * config.SQ_SIZE + x_height)
+    menu_bg_rect = pg.Rect(menu_x, menu_y, config.SQ_SIZE, 4 * config.SQ_SIZE + x_height)
 
     shadow_offset = 6
     shadow_rect = pg.Rect(
@@ -784,7 +884,9 @@ def draw_badge(
     badge_rect.center = (center_x, center_y)
 
     # Ensure badge does not render outside the board bounds
-    badge_rect.clamp_ip(pg.Rect(0, config.BOARD_TOP, config.BOARD_WIDTH, config.BOARD_HEIGHT))
+    badge_rect.clamp_ip(
+        pg.Rect(config.BOARD_LEFT, config.BOARD_TOP, config.BOARD_WIDTH, config.BOARD_HEIGHT)
+    )
 
     pg.draw.rect(screen, bg_color, badge_rect, border_radius=10)
     text_rect.center = badge_rect.center

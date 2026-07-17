@@ -199,10 +199,49 @@ def find_best_move(
     MoveTuple or None
         The best move tuple found, or None if the position has no legal moves.
     """
+    return search_position(gs, valid_moves, max_depth, time_limit)[0]
+
+
+def search_position(
+    gs: GameState,
+    valid_moves: list[MoveTuple] | None = None,
+    max_depth: int = 4,
+    time_limit: float = 5.0,
+) -> tuple[MoveTuple | None, int]:
+    """
+    Search the position and return both the best move and its score.
+
+    This is the same iterative-deepening search as `find_best_move`, but it
+    also reports the score of the last completed iteration — the extra piece
+    of information the game-review feature needs to draw the evaluation bar
+    and grade move quality.
+
+    Parameters
+    ----------
+    gs : GameState
+        The current game state object (mutated during search, then restored).
+    valid_moves : list of MoveTuple, optional
+        Pre-calculated legal AI move tuples for the root position. Passing a
+        subset of the legal moves restricts the search to those moves, which
+        the review feature uses to score the "second best" alternative.
+    max_depth : int, optional
+        Maximum iterative-deepening depth. Default is 4.
+    time_limit : float, optional
+        Soft time limit in seconds. Default is 5.0.
+
+    Returns
+    -------
+    tuple of (MoveTuple or None, int)
+        The best move found and its score in centipawns from the side to
+        move's perspective. With no legal moves the move is None and the
+        score is a mate/draw score for the terminal position.
+    """
     if valid_moves is None:
         valid_moves = gs.get_valid_moves(for_ai=True)
     if not valid_moves:
-        return None
+        # Terminal position: mated (score from the loser's perspective) or
+        # stalemated. Mirrors the scoring inside _negamax at ply 0.
+        return None, (-CHECKMATE_SCORE if gs.in_check else DRAW_SCORE)
 
     # Seed repetition detection with the real game history so the engine
     # recognizes (and can aim for or avoid) threefold repetitions
@@ -235,7 +274,7 @@ def find_best_move(
         if abs(best_score) >= MATE_THRESHOLD:
             break
 
-    return best_move
+    return best_move, best_score
 
 
 def _search_root(
