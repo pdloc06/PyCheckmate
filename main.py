@@ -226,7 +226,7 @@ def run_game(
     bar_font: pg.font.Font,
     vs_ai: bool,
     mode_key: str
-) -> None:
+) -> bool:
     """
     Run the main game loop: input handling, turn management, and rendering.
 
@@ -250,7 +250,10 @@ def run_game(
 
     Returns
     -------
-    None
+    bool
+        True if the player left via the in-game "Main Menu" button (the
+        caller should loop back to the opponent menu); False if the window
+        was closed instead.
     """
     gs = chess_engine.GameState()
     valid_moves = gs.get_valid_moves()
@@ -263,6 +266,7 @@ def run_game(
     undone_moves: list[chess_engine.Move] = []  # Stack to manage forward and backward history
     board_flipped = False  # State flag for flipping the board view
     promoting_move: chess_engine.Move | None = None  # Stores the move object temporarily when a pawn promotes
+    return_to_menu = False  # Set when the player clicks "Main Menu" instead of closing the window
 
     running = True
     game_over = False
@@ -432,9 +436,13 @@ def run_game(
 
                 # Logic when a player clicks inside the move log panel area
                 else:
-                    prev_btn, next_btn, restart_btn, flip_btn = ui.get_control_button_rects()
+                    menu_btn, prev_btn, next_btn, restart_btn, flip_btn = ui.get_control_button_rects()
 
-                    if restart_btn.collidepoint(location):
+                    if menu_btn.collidepoint(location):
+                        return_to_menu = True
+                        running = False
+
+                    elif restart_btn.collidepoint(location):
                         reset_game()
 
                     elif flip_btn.collidepoint(location):
@@ -556,6 +564,8 @@ def run_game(
 
         pg.display.flip()
 
+    return return_to_menu
+
 
 def main() -> None:
     """
@@ -580,8 +590,9 @@ def main() -> None:
     graphics.load_pieces_images()
     graphics.cache_coordinate_fonts(coord_font)
 
-    # Loop between the opponent and time-control menus so "Back" on the
-    # second screen can return to the first instead of only quitting
+    # Loop between the opponent menu, the time-control menu, and the game
+    # itself: "Back" on the time-control screen and "Main Menu" mid-game
+    # both return to the opponent menu instead of only quitting
     while True:
         vs_ai = run_main_menu(screen, clock, title_font, move_log_font)
         if vs_ai is None:
@@ -593,8 +604,9 @@ def main() -> None:
         if mode_key == ui.BACK_SENTINEL:
             continue
 
-        run_game(screen, clock, move_log_font, coord_font, bar_font, vs_ai, mode_key)
-        break
+        return_to_menu = run_game(screen, clock, move_log_font, coord_font, bar_font, vs_ai, mode_key)
+        if not return_to_menu:
+            break
 
     pg.quit()
 

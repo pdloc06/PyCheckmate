@@ -14,7 +14,7 @@ from gui import graphics
 # rendering and the click hit-testing can never drift apart
 LOG_TOP_PADDING = 5
 LOG_LINE_SPACING = 6
-LOG_RESERVED_BOTTOM = 120  # Safe space reserved for the control buttons
+LOG_RESERVED_BOTTOM = 160  # Safe space reserved for the control buttons
 
 # Standard chess point values (not the engine's centipawn tuning weights in
 # move_finder.PIECE_VALUES) used only to size the "+N" material lead badge
@@ -93,21 +93,22 @@ def format_clock(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def get_control_button_rects() -> tuple[pg.Rect, pg.Rect, pg.Rect, pg.Rect]:
+def get_control_button_rects() -> tuple[pg.Rect, pg.Rect, pg.Rect, pg.Rect, pg.Rect]:
     """
     Calculate and return the bounding rectangles for all UI control buttons.
 
     Returns
     -------
     tuple
-        A tuple of four pygame.Rect objects: (prev_btn, next_btn, restart_btn, flip_btn).
+        A tuple of five pygame.Rect objects: (menu_btn, prev_btn, next_btn, restart_btn, flip_btn).
     """
+    menu_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 120, config.MOVE_LOG_PANEL_WIDTH - 20, 30)
     prev_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 80, (config.MOVE_LOG_PANEL_WIDTH - 30) // 2, 30)
     next_btn = pg.Rect(config.BOARD_WIDTH + 20 + prev_btn.width, config.HEIGHT - 80, prev_btn.width, 30)
     restart_btn = pg.Rect(config.BOARD_WIDTH + 10, config.HEIGHT - 40, config.MOVE_LOG_PANEL_WIDTH - 70, 30)
     flip_btn = pg.Rect(config.BOARD_WIDTH + config.MOVE_LOG_PANEL_WIDTH - 50, config.HEIGHT - 40, 40, 30)
 
-    return prev_btn, next_btn, restart_btn, flip_btn
+    return menu_btn, prev_btn, next_btn, restart_btn, flip_btn
 
 
 def get_menu_button_rects() -> tuple[pg.Rect, pg.Rect]:
@@ -505,9 +506,11 @@ def draw_move_log(
 
     # Control buttons layout
     btn_color, text_color = config.THEME['button'], config.THEME['text']
-    prev_btn, next_btn, restart_btn, flip_btn = get_control_button_rects()
+    menu_btn, prev_btn, next_btn, restart_btn, flip_btn = get_control_button_rects()
 
-    for btn, txt in zip([prev_btn, next_btn, restart_btn, flip_btn], ["<", ">", "Restart Game", "Flip"]):
+    buttons = [menu_btn, prev_btn, next_btn, restart_btn, flip_btn]
+    labels = ["< Main Menu", "<", ">", "Restart Game", "Flip"]
+    for btn, txt in zip(buttons, labels):
         pg.draw.rect(screen, btn_color, btn, border_radius=5)
         text_surf = font.render(txt, True, text_color)
         screen.blit(text_surf, text_surf.get_rect(center=btn.center))
