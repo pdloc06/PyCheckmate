@@ -20,6 +20,7 @@ The search mutates the GameState in place via `make_ai_move()` /
 state is untouched. When running the search on a background thread, pass a
 `copy.deepcopy` of the GameState so the UI can keep rendering the original.
 """
+import math
 import random
 import time
 
@@ -236,13 +237,24 @@ LMP_MAX_DEPTH = 3
 LMP_COUNT = (0, 4, 7, 12)         # quiet-move budget, indexed by remaining depth
 HISTORY_EXEMPT_SCORE = 64         # history score that buys immunity from LMP
 
-# Late move reductions: quiet moves ordered past the first few are searched one
-# ply shallower with a scout window, and only re-searched at full depth if the
-# scout unexpectedly beats alpha. Conservative settings (reduce by one, only
-# after the third move, only from depth 3) so tactics are rarely missed.
+# Late move reductions: quiet moves ordered past the first few are scouted
+# shallower, and only re-searched at full depth if the scout unexpectedly
+# beats alpha. The reduction is *log-scaled* (search-review stage I): the
+# deeper the node and the later the move, the less the ordering believes in
+# it, so the shallower its scout — ln(depth)·ln(index)/2.25 plies, the shape
+# every strong engine converged on. A move with a proven history record is
+# reduced one ply less: its past cutoffs have earned it a closer look. The
+# table is precomputed once; index 0 rows/columns stay 0 (never used — the
+# first moves are never reduced).
 LMR_MIN_DEPTH = 3
 LMR_MIN_MOVE_INDEX = 3
-LMR_REDUCTION = 1
+LMR_TABLE: tuple[tuple[int, ...], ...] = tuple(
+    tuple(
+        int(0.75 + math.log(d) * math.log(m) / 2.25) if d and m else 0
+        for m in range(64)
+    )
+    for d in range(64)
+)
 
 # Dynamic time management (step 8). Each deepening iteration costs roughly
 # 3-5x the one before it, so an iteration started with most of the budget
@@ -779,18 +791,22 @@ def _negamax(
             #
             # Late move reduction rides on the same scout: a quiet move
             # ordered late (not a capture, promotion, killer, or checking
-            # move, and not while we are in check) is unlikely to be best, so
-            # its scout also runs a ply shallower. `gs.in_check` here reflects
-            # the position *after* the move, i.e. whether the move gives check.
-            reduction = LMR_REDUCTION if (
-                depth >= LMR_MIN_DEPTH
-                and move_index >= LMR_MIN_MOVE_INDEX
-                and not in_check
-                and not gs.in_check
-                and undo[0] == EMPTY
-                and move[4] < 3
-                and move not in info.killers[min(ply, 63)]
-            ) else 0
+            # move, and not while we are in check) is unlikely to be best,
+            # so its scout runs shallower — by the log-scaled amount from
+            # LMR_TABLE, minus one ply for a move whose history record has
+            # earned it a closer look, and never into the quiescence
+            # boundary (the scout keeps at least one full ply).
+            reduction = 0
+            if (depth >= LMR_MIN_DEPTH
+                    and move_index >= LMR_MIN_MOVE_INDEX
+                    and quiet
+                    and not in_check
+                    and move not in info.killers[min(ply, 63)]):
+                reduction = LMR_TABLE[min(depth, 63)][min(move_index, 63)]
+                if reduction and info.history.get(
+                        (move[0], move[1], move[2], move[3]), 0) >= HISTORY_EXEMPT_SCORE:
+                    reduction -= 1
+                reduction = min(reduction, depth - 2)
             if best_move is None:
                 score = -_negamax(gs, depth - 1, -beta, -alpha, ply + 1, info)
             else:
