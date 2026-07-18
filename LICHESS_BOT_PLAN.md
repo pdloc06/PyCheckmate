@@ -180,6 +180,46 @@ challenges one at random with a time control drawn from `challenge_initial_time`
 `opponent_rating_difference` for opponent strength, and set
 `challenge.accept_bot: true` so bots can challenge back too.
 
+### Operating it: the one rule that keeps it stable
+
+**After any change, restart the agent exactly once and then leave it alone.**
+
+Lichess protects `/api/stream/event` (the connection the bot holds open to
+receive challenges and game events) with an **anti-polling rate limit**: open
+that stream too many times in a short window and Lichess returns 429s. Every
+`launchctl` restart re-opens the stream, so a burst of back-to-back restarts
+(e.g. iterating on `config.yml`) trips it. Once tripped, it can spiral: the
+bridge retries the reconnect every ~1–2 s while Lichess is asking for a ~60 s
+wait, so it re-opens *faster than the cooldown clears* and **cannot recover
+while running**. Symptoms: the bot shows online but "accepts challenges without
+playing" (the stream is down exactly when a game needs its first move), and
+`launchd.err.log` fills with `RateLimitedError: /api/stream/event is
+rate-limited`.
+
+To reload config safely, use a single in-place restart and then wait:
+
+```
+launchctl kickstart -k gui/$(id -u)/com.pycheckmate.bot   # once
+sleep 120 && wc -l ~/PycharmProjects/lichess-bot/launchd.err.log   # 0 == healthy
+```
+
+**Recovering from a rate-limit spiral** (err log growing by hundreds of lines):
+the fix is *silence*, not more restarts — every restart that hits the limit
+renews the penalty.
+
+```
+launchctl bootout gui/$(id -u)/com.pycheckmate.bot     # STOP (halts the retry loop)
+# wait — minutes for a light trip, up to an hour+ if it was hammered hard today
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pycheckmate.bot.plist   # start once
+sleep 120 && wc -l ~/PycharmProjects/lichess-bot/launchd.err.log   # 0 == recovered
+```
+
+If the err log is still hundreds of lines two minutes after a start, the
+cooldown wasn't long enough: `bootout` again and wait longer before retrying.
+lichess-bot self-reconnects fine on *normal* network drops — this trap is
+specifically about **how often you restart the process**, so during live
+config tuning, change several settings at once and reload just once.
+
 ### Learn from the games
 
 Log games (lichess-bot writes PGNs) and skim losses for blunders — feed
