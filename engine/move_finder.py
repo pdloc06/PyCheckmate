@@ -222,6 +222,11 @@ RFP_MARGIN = 120                  # per remaining ply
 FUTILITY_MAX_DEPTH = 2
 FUTILITY_MARGIN = (0, 150, 300)   # indexed by remaining depth
 
+# Delta pruning margin for quiescence (search-review stage G): a capture is
+# skipped when even winning the victim outright, plus this safety cushion for
+# positional swing, cannot lift the line back to alpha.
+DELTA_MARGIN = 200
+
 # Late move reductions: quiet moves ordered past the first few are searched one
 # ply shallower with a scout window, and only re-searched at full depth if the
 # scout unexpectedly beats alpha. Conservative settings (reduce by one, only
@@ -835,6 +840,22 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
     info.nodes += 1
     info.check_time()
 
+    # Transposition-table probe (search-review stage G): quiescence visits
+    # the bulk of all nodes, and many were already settled — by a real
+    # depth >= 1 search of this position, or by an earlier quiescence pass.
+    # Every stored entry's depth is at least the 0 this node searches at,
+    # so any stored bound that closes the window answers immediately.
+    key = gs.zobrist_key
+    entry = info.tt.get(key)
+    if entry is not None:
+        _tt_depth, tt_flag, tt_score, _tt_move, _tt_gen = entry
+        if tt_flag == TT_EXACT:
+            return tt_score
+        if tt_flag == TT_LOWER and tt_score >= beta:
+            return tt_score
+        if tt_flag == TT_UPPER and tt_score <= alpha:
+            return tt_score
+
     turn = 1 if gs.white_to_move else -1
     stand_pat = turn * evaluate(gs)
 
@@ -855,6 +876,9 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
 
     noisy.sort(key=lambda m: _mvv_lva(gs, m), reverse=True)
 
+    original_alpha = alpha
+    best_move: MoveTuple | None = None
+
     in_check = gs.in_check
     for move in noisy:
         # Prune captures that lose material by static exchange: they cannot
@@ -863,6 +887,18 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
         # >= 3), whose +queen swing SEE does not account for.
         if not in_check and move[4] < 3 and _see(gs, move) < 0:
             continue
+        # Delta pruning (stage G): even winning the victim outright plus a
+        # safety margin can't lift this line back to alpha — skip the capture
+        # before paying for make/unmake and a child search. Same exemptions
+        # as the SEE prune, plus mate-score windows, where material
+        # arithmetic means nothing.
+        if not in_check and move[4] < 3 and abs(alpha) < MATE_THRESHOLD:
+            # En passant is the one capture whose victim is not on the
+            # target square; every other move[4] < 3 capture's is.
+            victim = PIECE_VALUES[WP] if move[4] == 2 \
+                else PIECE_VALUES[gs.board[move[2]][move[3]]]
+            if stand_pat + victim + DELTA_MARGIN <= alpha:
+                continue
         undo = gs.make_ai_move(move)
         try:
             score = -_quiescence(gs, -beta, -alpha, ply + 1, info)
@@ -870,10 +906,28 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
             gs.unmake_ai_move(move, undo)
 
         if score >= beta:
+            # Store the fail-high as a depth-0 lower bound (stage G), under
+            # the same replacement rule as the main search: never displace a
+            # deeper entry from the current generation.
+            if abs(beta) < MATE_THRESHOLD:
+                existing = info.tt.get(key)
+                if (existing is None or existing[4] != info.generation
+                        or existing[0] <= 0):
+                    info.tt[key] = (0, TT_LOWER, beta, move, info.generation)
             return beta
         if score > alpha:
             alpha = score
+            best_move = move
 
+    # Store the settled result (stage G): an exact score if some capture
+    # raised alpha, otherwise an upper bound. Mate scores stay out of the
+    # table (ply-relative), matching the main search.
+    if abs(alpha) < MATE_THRESHOLD:
+        flag = TT_EXACT if alpha > original_alpha else TT_UPPER
+        existing = info.tt.get(key)
+        if (existing is None or existing[4] != info.generation
+                or existing[0] <= 0):
+            info.tt[key] = (0, flag, alpha, best_move, info.generation)
     return alpha
 
 
