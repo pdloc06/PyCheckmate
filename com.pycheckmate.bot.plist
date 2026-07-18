@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template launchd LaunchAgent for running lichess-bot always-on (step 7 of
+  LICHESS_BOT_PLAN.md). A LaunchAgent runs in your logged-in user session, so
+  it inherits your network access and your uv/PyPy toolchain — unlike a
+  root-owned LaunchDaemon.
+
+  To use it:
+    1. Replace the two /ABSOLUTE/PATH/TO placeholders and YOURNAME below with
+       real paths (the lichess-bot clone, and your home directory).
+    2. Copy to ~/Library/LaunchAgents/com.pycheckmate.bot.plist
+    3. plutil -lint ~/Library/LaunchAgents/com.pycheckmate.bot.plist   # -> OK
+    4. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pycheckmate.bot.plist
+
+  Why the pieces are here:
+    - caffeinate -s wraps run.sh so the Mac never *system*-sleeps while the bot
+      is running (screen saver / display sleep / lock are harmless — only full
+      system sleep drops the bot). The assertion lives only as long as the bot
+      process, and only holds on AC power, so keep the laptop plugged in. There
+      is nothing persistent to undo: unload the job and normal sleep returns.
+    - RunAtLoad starts the bot when you log in; KeepAlive restarts it if it
+      crashes or the network drop kills it (lichess-bot also self-reconnects).
+    - EnvironmentVariables.PATH is required: launchd hands the job a bare PATH,
+      but engines/engine.sh calls `uv` (Homebrew) which resolves PyPy (~/.local).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pycheckmate.bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-s</string>
+        <string>/ABSOLUTE/PATH/TO/lichess-bot/run.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/ABSOLUTE/PATH/TO/lichess-bot</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/Users/YOURNAME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/ABSOLUTE/PATH/TO/lichess-bot/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/ABSOLUTE/PATH/TO/lichess-bot/launchd.err.log</string>
+</dict>
+</plist>
