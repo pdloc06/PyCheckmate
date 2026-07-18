@@ -114,15 +114,77 @@ In rough order of value per effort:
    material (K vs K, lone minor, KNN vs K) as an exact draw; lichess-bot's
    `offer_draw` config hooks act on the resulting scores.
 
-## Step 7 — Deployment
+## Step 7 — Deployment (macOS / Apple Silicon)
 
-- Any always-on box works: a Raspberry Pi, a $5 VPS, or a spare laptop; the
-  bot only needs outbound HTTPS.
-- Run under `systemd` or `tmux`; lichess-bot auto-reconnects on network
-  drops.
-- Log games (lichess-bot writes PGNs) and skim losses for blunders — feed
-  concrete positions back into `tests/` as regression FENs via
-  `GameState.from_fen`.
+The bot only needs outbound HTTPS, so any always-on box works (a Raspberry Pi,
+a $5 VPS, a spare laptop). This project is deployed on a **MacBook Air (M2)**,
+so the recipe below is macOS-native: **launchd** (macOS's service manager, the
+equivalent of `systemd`) plus **`caffeinate`** to keep the laptop awake.
+
+### The laptop-sleep problem
+
+A laptop's real risk isn't crashes — lichess-bot auto-reconnects on network
+drops — it's **sleep**. The screen saver, display sleep, and screen lock are
+all harmless: background processes keep running and the connection stays up.
+Only *full system sleep* suspends the process and drops the game (an
+in-progress game will then flag or abort).
+
+The fix is `caffeinate -s`, which asserts "don't system-sleep" **only while the
+wrapped process runs**, and **only on AC power**. So: keep the Mac **plugged
+in** (lid may stay open; the screen is free to sleep). Nothing persistent is
+changed — unlike `sudo pmset -c disablesleep 1`, there is no global setting to
+remember to undo. When the bot stops, the Mac sleeps normally again.
+
+### Run it under launchd
+
+A **LaunchAgent** runs in your logged-in user session, so it inherits your
+network access and your uv/PyPy toolchain (a root `LaunchDaemon` would not).
+`com.pycheckmate.bot.plist` in this repo is a filled-in-the-blanks template:
+
+1. Copy it to `~/Library/LaunchAgents/com.pycheckmate.bot.plist` and replace the
+   `/ABSOLUTE/PATH/TO` and `YOURNAME` placeholders with real paths (the
+   lichess-bot clone and your home dir). It wraps `run.sh` in `caffeinate -s`,
+   sets `RunAtLoad` (start at login) + `KeepAlive` (restart on crash), points
+   `PATH` at Homebrew + `~/.local/bin` (launchd gives a bare PATH, but
+   `engines/engine.sh` needs `uv`/PyPy), and logs to `launchd.{out,err}.log`.
+2. Validate and start it:
+
+   ```
+   plutil -lint ~/Library/LaunchAgents/com.pycheckmate.bot.plist    # -> OK
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pycheckmate.bot.plist
+   launchctl list | grep pycheckmate                                 # shows a PID
+   tail -f /ABSOLUTE/PATH/TO/lichess-bot/launchd.err.log             # watch it connect
+   pmset -g assertions                                               # caffeinate holds PreventSystemSleep
+   ```
+
+### Stop / uninstall (back to a normal Mac)
+
+```
+launchctl bootout gui/$(id -u)/com.pycheckmate.bot     # stop + disable auto-start
+rm ~/Library/LaunchAgents/com.pycheckmate.bot.plist    # remove entirely (optional)
+pmset -g assertions                                    # confirm no stray sleep assertion
+killall caffeinate 2>/dev/null                         # only if one lingers
+```
+
+Because no `pmset`/`sudo` system settings were touched, stopping the job is the
+whole cleanup — `caffeinate` dies with the bot and the Mac resumes normal sleep.
+
+### Auto-challenging other bots (matchmaking)
+
+You don't hunt for opponents by hand — lichess-bot's built-in matchmaking does
+it. Set `matchmaking.allow_matchmaking: true` in `config.yml` and the bridge
+pulls the live online-bot list from Lichess's `/api/bot/online` API, filters by
+rating/variant suitability, and (after being idle `challenge_timeout` minutes)
+challenges one at random with a time control drawn from `challenge_initial_time`
+/ `challenge_increment`. Set `challenge_mode` to `casual`/`rated`, tune
+`opponent_rating_difference` for opponent strength, and set
+`challenge.accept_bot: true` so bots can challenge back too.
+
+### Learn from the games
+
+Log games (lichess-bot writes PGNs) and skim losses for blunders — feed
+concrete positions back into `tests/` as regression FENs via
+`GameState.from_fen`.
 
 ## Testing pipeline (before going online)
 
