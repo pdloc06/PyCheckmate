@@ -152,4 +152,4 @@ uv run --no-project python -m engine.selfplay        # 20 games (pass a number t
 | `tests/` | Pytest suite |
 | `LICHESS_BOT_PLAN.md` | Roadmap and deployment recipe for running the engine as a Lichess bot |
 | `engine.sh` | Launcher template pointing lichess-bot at the UCI engine |
-| `com.pycheckmate.bot.plist` | launchd LaunchAgent template to run the bot always-on (macOS) |
+| `bot` | control script for the Lichess bot (`bot up/down/status/log`); copy into the lichess-bot clone |

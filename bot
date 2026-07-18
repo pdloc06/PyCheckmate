@@ -1,0 +1,89 @@
+#!/bin/bash
+# bot — start/stop/status for the PyCheckmate Lichess bot.
+#
+# Why this exists instead of launchd: lichess-bot spawns multiprocessing
+# children (the event-stream watcher among them). If the main process dies
+# without cleaning up, those children survive as orphans and keep hitting
+# /api/stream/event forever, which renews Lichess's 429 penalty no matter
+# how long you "wait". Every up/down here therefore sweeps the whole
+# process tree, and nothing auto-restarts behind your back.
+set -u
+
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"   # resolve symlinks: paths must be the real clone's
+PIDFILE="$DIR/bot.pid"
+LOG="$DIR/bot.log"
+MATCH="$DIR/.venv"   # every bot process (main + children) runs this venv's python
+
+alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+procs() { pgrep -f "$MATCH" 2>/dev/null; }
+
+sweep() {
+    # Kill the pidfile process, then every venv process (catches orphans).
+    [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+    pkill -f "$MATCH" 2>/dev/null
+    for _ in 1 2 3 4 5; do
+        [ -z "$(procs)" ] && break
+        sleep 1
+    done
+    pkill -9 -f "$MATCH" 2>/dev/null
+    rm -f "$PIDFILE"
+}
+
+case "${1:-}" in
+up)
+    if alive; then
+        echo "already running (pid $(cat "$PIDFILE")) — use 'bot down' first"
+        exit 1
+    fi
+    strays="$(procs)"
+    if [ -n "$strays" ]; then
+        echo "killing stray bot processes: $(echo "$strays" | tr '\n' ' ')"
+        sweep
+        echo "waiting 60s so Lichess's rate-limit window clears before reconnecting..."
+        sleep 60
+    fi
+    cd "$DIR" || exit 1
+    # run.sh loads the token from .token and execs the venv python;
+    # caffeinate -s keeps the Mac awake (on AC power) while the bot runs.
+    nohup caffeinate -s "$DIR/run.sh" >> "$LOG" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "started (pid $(cat "$PIDFILE")), keeping Mac awake — 'bot log' to watch, 'bot down' to stop"
+    ;;
+down)
+    if ! alive && [ -z "$(procs)" ]; then
+        echo "not running"
+        rm -f "$PIDFILE"
+        exit 0
+    fi
+    sweep
+    left="$(procs)"
+    if [ -z "$left" ]; then
+        echo "stopped, all children killed"
+    else
+        echo "WARNING: processes still alive: $left"
+        exit 1
+    fi
+    ;;
+status)
+    if alive; then
+        echo "running (pid $(cat "$PIDFILE"), $(procs | wc -l | tr -d ' ') processes)"
+    elif [ -n "$(procs)" ]; then
+        echo "STRAY processes without pidfile (run 'bot down'): $(procs | tr '\n' ' ')"
+    else
+        echo "stopped"
+    fi
+    if [ -f "$LOG" ]; then
+        rl=$(tail -200 "$LOG" | grep -c "rate-limit\|429" || true)
+        echo "recent rate-limit lines (last 200 log lines): $rl"
+        echo "--- last log lines ---"
+        tail -5 "$LOG"
+    fi
+    ;;
+log)
+    tail -f "$LOG"
+    ;;
+*)
+    echo "usage: bot up|down|status|log"
+    exit 1
+    ;;
+esac

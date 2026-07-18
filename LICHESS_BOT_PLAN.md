@@ -117,9 +117,10 @@ In rough order of value per effort:
 ## Step 7 — Deployment (macOS / Apple Silicon)
 
 The bot only needs outbound HTTPS, so any always-on box works (a Raspberry Pi,
-a $5 VPS, a spare laptop). This project is deployed on a **MacBook Air (M2)**,
-so the recipe below is macOS-native: **launchd** (macOS's service manager, the
-equivalent of `systemd`) plus **`caffeinate`** to keep the laptop awake.
+a $5 VPS, a spare laptop). This project is deployed on a **MacBook Air (M2)**
+that travels, so the recipe below is macOS-native and **manually controlled**:
+a small `bot` control script plus **`caffeinate`** to keep the laptop awake
+while it runs.
 
 ### The laptop-sleep problem
 
@@ -135,39 +136,45 @@ in** (lid may stay open; the screen is free to sleep). Nothing persistent is
 changed — unlike `sudo pmset -c disablesleep 1`, there is no global setting to
 remember to undo. When the bot stops, the Mac sleeps normally again.
 
-### Run it under launchd
+### Run it with the `bot` script
 
-A **LaunchAgent** runs in your logged-in user session, so it inherits your
-network access and your uv/PyPy toolchain (a root `LaunchDaemon` would not).
-`com.pycheckmate.bot.plist` in this repo is a filled-in-the-blanks template:
+Deployment used to be a launchd LaunchAgent (`RunAtLoad` + `KeepAlive`), but
+that design fought the way this bot is actually hosted — on a laptop that gets
+carried around. Auto-start at login opened the event stream on whatever Wi-Fi
+the laptop happened to join, and `KeepAlive` relaunched a crashing bot in a
+tight loop, each relaunch re-opening the stream (see the rate-limit section
+below for why that hurts). A bot on a portable machine wants **manual, explicit
+control**, so launchd was retired in favor of a plain control script.
 
-1. Copy it to `~/Library/LaunchAgents/com.pycheckmate.bot.plist` and replace the
-   `/ABSOLUTE/PATH/TO` and `YOURNAME` placeholders with real paths (the
-   lichess-bot clone and your home dir). It wraps `run.sh` in `caffeinate -s`,
-   sets `RunAtLoad` (start at login) + `KeepAlive` (restart on crash), points
-   `PATH` at Homebrew + `~/.local/bin` (launchd gives a bare PATH, but
-   `engines/engine.sh` needs `uv`/PyPy), and logs to `launchd.{out,err}.log`.
-2. Validate and start it:
-
-   ```
-   plutil -lint ~/Library/LaunchAgents/com.pycheckmate.bot.plist    # -> OK
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pycheckmate.bot.plist
-   launchctl list | grep pycheckmate                                 # shows a PID
-   tail -f /ABSOLUTE/PATH/TO/lichess-bot/launchd.err.log             # watch it connect
-   pmset -g assertions                                               # caffeinate holds PreventSystemSleep
-   ```
-
-### Stop / uninstall (back to a normal Mac)
+`bot` in this repo is that script — copy it into the lichess-bot clone (it
+resolves all paths relative to its own location), `chmod +x` it, and optionally
+symlink it onto your PATH:
 
 ```
-launchctl bootout gui/$(id -u)/com.pycheckmate.bot     # stop + disable auto-start
-rm ~/Library/LaunchAgents/com.pycheckmate.bot.plist    # remove entirely (optional)
-pmset -g assertions                                    # confirm no stray sleep assertion
-killall caffeinate 2>/dev/null                         # only if one lingers
+cp bot /PATH/TO/lichess-bot/bot && chmod +x /PATH/TO/lichess-bot/bot
+ln -sf /PATH/TO/lichess-bot/bot ~/.local/bin/bot
 ```
 
-Because no `pmset`/`sudo` system settings were touched, stopping the job is the
-whole cleanup — `caffeinate` dies with the bot and the Mac resumes normal sleep.
+Four subcommands, pidfile-based (`bot.pid`), all logging to `bot.log`:
+
+```
+bot up       # start (wrapped in caffeinate -s), refuses if already running
+bot down     # stop, then sweep every process from the bot's venv
+bot status   # running/stopped, process count, recent rate-limit lines, log tail
+bot log      # tail -f bot.log
+```
+
+`bot up` wraps the bot in `caffeinate -s` (the sleep fix above) via `nohup`, so
+it survives closing the terminal. There is deliberately **no auto-restart**: a
+crashed bot stays down until you say otherwise, which is exactly the behavior
+that keeps the rate limiter happy. lichess-bot reconnects through ordinary
+network drops on its own; process-level crashes are rare enough to handle by
+hand. Stopping is the whole cleanup — `caffeinate` dies with the bot and the
+Mac resumes normal sleep, no `pmset`/`sudo` settings to undo.
+
+The critical part is the **sweep** in `bot down` (and defensively in `bot up`):
+it doesn't just kill the main pid, it `pkill`s everything running the clone's
+`.venv` python. Why that matters is the next section's war story.
 
 ### Auto-challenging other bots (matchmaking)
 
@@ -180,45 +187,45 @@ challenges one at random with a time control drawn from `challenge_initial_time`
 `opponent_rating_difference` for opponent strength, and set
 `challenge.accept_bot: true` so bots can challenge back too.
 
-### Operating it: the one rule that keeps it stable
-
-**After any change, restart the agent exactly once and then leave it alone.**
+### The rate-limit trap: orphaned children, not restarts
 
 Lichess protects `/api/stream/event` (the connection the bot holds open to
 receive challenges and game events) with an **anti-polling rate limit**: open
-that stream too many times in a short window and Lichess returns 429s. Every
-`launchctl` restart re-opens the stream, so a burst of back-to-back restarts
-(e.g. iterating on `config.yml`) trips it. Once tripped, it can spiral: the
-bridge retries the reconnect every ~1–2 s while Lichess is asking for a ~60 s
-wait, so it re-opens *faster than the cooldown clears* and **cannot recover
-while running**. Symptoms: the bot shows online but "accepts challenges without
-playing" (the stream is down exactly when a game needs its first move), and
-`launchd.err.log` fills with `RateLimitedError: /api/stream/event is
-rate-limited`.
+that stream too many times in a short window and Lichess returns 429s, and per
+the [official API tips](https://lichess.org/page/api-tips) the only cure is to
+*wait a full minute* before touching the API again. Symptoms of tripping it:
+the bot shows online but "accepts challenges without playing" (the stream is
+down exactly when a game needs its first move), and the log fills with
+`RateLimitedError: /api/stream/event is rate-limited`.
 
-To reload config safely, use a single in-place restart and then wait:
+The trap's real mechanism took a while to diagnose. Restart bursts were the
+first suspect, but the actual culprit was **orphaned child processes**:
+lichess-bot runs its event-stream watcher (`watch_control_stream`) as a
+`multiprocessing.Process`. If the main process is killed without a clean
+shutdown, that child survives, reparented to PID 1 — invisible unless you go
+looking with `ps` — and its reconnect loop keeps re-opening `/api/stream/event`
+*forever*. From Lichess's side the token never went quiet, so the 429 penalty
+renewed no matter how long the human "waited". (The observed worst case: six
+orphans quietly hammering the API for 16 hours while every fresh start of the
+bot mysteriously hit 429s within seconds.)
 
-```
-launchctl kickstart -k gui/$(id -u)/com.pycheckmate.bot   # once
-sleep 120 && wc -l ~/PycharmProjects/lichess-bot/launchd.err.log   # 0 == healthy
-```
+That is why `bot down`'s sweep kills **every** process from the clone's
+`.venv`, not just the pidfile pid — and why `bot up` runs the same sweep first
+(then waits 60 s, honoring the official cooldown) if it finds strays.
 
-**Recovering from a rate-limit spiral** (err log growing by hundreds of lines):
-the fix is *silence*, not more restarts — every restart that hits the limit
-renews the penalty.
+Two smaller mitigations live in the lichess-bot clone as local patches:
 
-```
-launchctl bootout gui/$(id -u)/com.pycheckmate.bot     # STOP (halts the retry loop)
-# wait — minutes for a light trip, up to an hour+ if it was hammered hard today
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.pycheckmate.bot.plist   # start once
-sleep 120 && wc -l ~/PycharmProjects/lichess-bot/launchd.err.log   # 0 == recovered
-```
+- `watch_control_stream` catches `RateLimitedError` and sleeps out the *whole*
+  remaining cooldown instead of retrying every second — one reconnect per
+  cooldown instead of sixty tracebacks a minute in the log.
+- `handle_challenge` applies exponential backoff (60 s → 600 s cap) to 429s on
+  the challenge endpoint.
 
-If the err log is still hundreds of lines two minutes after a start, the
-cooldown wasn't long enough: `bootout` again and wait longer before retrying.
-lichess-bot self-reconnects fine on *normal* network drops — this trap is
-specifically about **how often you restart the process**, so during live
-config tuning, change several settings at once and reload just once.
+**Day-to-day rule:** config changes still deserve a single `bot down` /
+`bot up` cycle, not a burst of them — every stream re-open counts against the
+anti-polling window. If `bot status` shows rate-limit lines two minutes after
+a start, run `bot down`, confirm with `bot status` that **zero** processes
+remain (that's the lesson), wait a couple of minutes, and `bot up` once.
 
 ### Learn from the games
 
