@@ -261,9 +261,13 @@ def test_passed_pawn_bonus(custom_gs):
     blocked = move_finder.evaluate(custom_gs(empty_board))
 
     # The delta is the black pawn's own value/PST plus the lost passed bonus
-    # (the d6 pawn itself is not passed: the e5 pawn stands ahead of it)
+    # (the d6 pawn itself is not passed: the e5 pawn stands ahead of it),
+    # minus the isolated-pawn penalty the lone d6 pawn drags with it. The
+    # white e-pawn is equally isolated in both positions, so its penalty
+    # cancels out of the difference.
     expected_delta = (move_finder.PIECE_VALUES[WP] + move_finder.PST[PAWN][5][3]
-                      + move_finder.PASSED_PAWN_BONUS[3])
+                      + move_finder.PASSED_PAWN_BONUS[3]
+                      - move_finder.ISOLATED_PAWN_PENALTY)
     assert passed - blocked == expected_delta
 
 

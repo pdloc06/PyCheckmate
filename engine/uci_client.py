@@ -77,6 +77,10 @@ class UciEngineClient:
     ----------
     command : list[str]
         Command vector to spawn the engine (interpreter + module args).
+    cwd : str, optional
+        Working directory for the subprocess. Defaults to this repo's root;
+        pointing it at another checkout runs *that* checkout's engine — which
+        is how `engine.abtest` pits two versions against each other.
 
     Raises
     ------
@@ -84,7 +88,7 @@ class UciEngineClient:
         If the process cannot be spawned or fails the UCI handshake.
     """
 
-    def __init__(self, command: list[str]) -> None:
+    def __init__(self, command: list[str], cwd: str | None = None) -> None:
         self.command = command
         self._lock = threading.Lock()
         try:
@@ -93,7 +97,7 @@ class UciEngineClient:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                cwd=PROJECT_ROOT,
+                cwd=cwd or PROJECT_ROOT,
                 text=True,
                 bufsize=1,  # Line-buffered: each protocol line flushes immediately
             )

@@ -52,6 +52,23 @@ DRAW_SCORE = 0
 # Two bishops cover both square colors; the pair is worth a few tenths of a
 # pawn beyond the pieces' individual values.
 BISHOP_PAIR_BONUS = 30
+
+# Rook activity (step 8): rooks earn their keep on files the pawns have
+# vacated. A semi-open file (own pawns gone) gives the rook targets; a fully
+# open file gives it the whole board; the 7th rank attacks the enemy's pawn
+# line and boxes in the king. These are the terms whose absence let the bot
+# shuffle its rooks along the back rank while its first online loss was
+# being squeezed (lichess.org/GDTprQUM).
+ROOK_SEMI_OPEN_FILE_BONUS = 10
+ROOK_OPEN_FILE_BONUS = 20
+ROOK_ON_SEVENTH_BONUS = 20
+
+# Pawn-structure penalties (step 8). Doubled pawns blockade each other and
+# can't create passers; isolated pawns have no pawn that can ever defend
+# them, so they tie a piece to the job. Each is charged per offending pawn
+# beyond the first / per isolated pawn.
+DOUBLED_PAWN_PENALTY = 15
+ISOLATED_PAWN_PENALTY = 12
 # Passed-pawn bonus indexed by the pawn's row from White's perspective
 # (row 1 = one step from promotion; rows 0 and 7 can't hold a pawn).
 # Black pawns index with the mirrored row, matching the PST convention.
@@ -1008,6 +1025,12 @@ def evaluate(gs: GameState) -> int:
     # i.e. the black minimum row on those files is not below the pawn's row.
     white_max_row = [-1] * 10
     black_min_row = [8] * 10
+    # Pawns per file (same col + 1 sentinel indexing) drive the doubled/
+    # isolated penalties and the rook file bonuses below.
+    white_file_pawns = [0] * 10
+    black_file_pawns = [0] * 10
+    white_rooks: list[tuple[int, int]] = []
+    black_rooks: list[tuple[int, int]] = []
 
     for row, col in gs.white_pieces:
         piece = board[row][col]
@@ -1017,12 +1040,15 @@ def evaluate(gs: GameState) -> int:
         score += PIECE_VALUES[piece] + PST[piece_type][row][col]
         if piece_type == PAWN:
             white_pawns.append((row, col))
+            white_file_pawns[col + 1] += 1
             if row > white_max_row[col + 1]:
                 white_max_row[col + 1] = row
         else:
             non_pawn_material += PIECE_VALUES[piece]
             if piece_type == BISHOP:
                 white_bishops += 1
+            elif piece_type == ROOK:
+                white_rooks.append((row, col))
 
     for row, col in gs.black_pieces:
         piece = board[row][col]
@@ -1033,17 +1059,51 @@ def evaluate(gs: GameState) -> int:
         score -= PIECE_VALUES[piece] + PST[piece_type][7 - row][col]
         if piece_type == PAWN:
             black_pawns.append((row, col))
+            black_file_pawns[col + 1] += 1
             if row < black_min_row[col + 1]:
                 black_min_row[col + 1] = row
         else:
             non_pawn_material += PIECE_VALUES[piece]
             if piece_type == BISHOP:
                 black_bishops += 1
+            elif piece_type == ROOK:
+                black_rooks.append((row, col))
 
     if white_bishops >= 2:
         score += BISHOP_PAIR_BONUS
     if black_bishops >= 2:
         score -= BISHOP_PAIR_BONUS
+
+    # Doubled/isolated pawns, judged per file. The sentinel columns mean the
+    # adjacent-file lookups never need bounds checks, same as the passed-pawn
+    # test below.
+    for file_index in range(1, 9):
+        count = white_file_pawns[file_index]
+        if count:
+            if count > 1:
+                score -= DOUBLED_PAWN_PENALTY * (count - 1)
+            if not white_file_pawns[file_index - 1] and not white_file_pawns[file_index + 1]:
+                score -= ISOLATED_PAWN_PENALTY * count
+        count = black_file_pawns[file_index]
+        if count:
+            if count > 1:
+                score += DOUBLED_PAWN_PENALTY * (count - 1)
+            if not black_file_pawns[file_index - 1] and not black_file_pawns[file_index + 1]:
+                score += ISOLATED_PAWN_PENALTY * count
+
+    # Rook activity: open/semi-open files and the 7th rank.
+    for row, col in white_rooks:
+        if not white_file_pawns[col + 1]:
+            score += (ROOK_SEMI_OPEN_FILE_BONUS if black_file_pawns[col + 1]
+                      else ROOK_OPEN_FILE_BONUS)
+        if row == 1:
+            score += ROOK_ON_SEVENTH_BONUS
+    for row, col in black_rooks:
+        if not black_file_pawns[col + 1]:
+            score -= (ROOK_SEMI_OPEN_FILE_BONUS if white_file_pawns[col + 1]
+                      else ROOK_OPEN_FILE_BONUS)
+        if row == 6:
+            score -= ROOK_ON_SEVENTH_BONUS
 
     for row, col in white_pawns:
         if (black_min_row[col] >= row

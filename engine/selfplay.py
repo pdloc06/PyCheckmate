@@ -45,7 +45,8 @@ DEPTH = 6        # ply cap; the clock stops the search first
 MAX_PLIES = 300
 
 
-def play_game(white: UciEngineClient, black: UciEngineClient) -> tuple[str, int, str | None]:
+def play_game(white: UciEngineClient, black: UciEngineClient,
+              depth: int = DEPTH, movetime: float = MOVETIME) -> tuple[str, int, str | None]:
     """
     Play one full game between two engine clients and referee every move.
 
@@ -59,6 +60,10 @@ def play_game(white: UciEngineClient, black: UciEngineClient) -> tuple[str, int,
     white, black : UciEngineClient
         The two engine subprocesses. `new_game()` is called on both here so
         each starts the game with a cleared transposition table.
+    depth : int
+        Ply cap passed to each search; the clock normally stops it first.
+    movetime : float
+        Per-move search budget in seconds.
 
     Returns
     -------
@@ -85,7 +90,7 @@ def play_game(white: UciEngineClient, black: UciEngineClient) -> tuple[str, int,
         side = 'White' if gs.white_to_move else 'Black'
 
         try:
-            uci = engine.search_from_moves(played, DEPTH, MOVETIME)
+            uci = engine.search_from_moves(played, depth, movetime)
         except EngineClientError as exc:
             return ('crash', len(played), f'{side} engine crashed after {played}: {exc}')
 
