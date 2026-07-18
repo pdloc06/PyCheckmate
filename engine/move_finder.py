@@ -202,6 +202,15 @@ LMR_MIN_DEPTH = 3
 LMR_MIN_MOVE_INDEX = 3
 LMR_REDUCTION = 1
 
+# Dynamic time management (step 8). Each deepening iteration costs roughly
+# 3-5x the one before it, so an iteration started with most of the budget
+# already spent will almost certainly be aborted mid-search — time spent,
+# nothing gained. Instead of starting it, stop and bank the remainder: under
+# a real clock the unused time stays on it, buying deeper searches on later
+# (harder) moves. 0.45 approximates "could the next iteration finish?" for
+# a ~3x growth factor.
+SOFT_STOP_FRACTION = 0.45
+
 # Aspiration windows: from this depth on, re-search around the previous
 # iteration's score inside a narrow window instead of the full one. Most
 # searches stay inside it, so alpha-beta prunes far more; the rare fail-high /
@@ -379,10 +388,22 @@ def search_position(
     root_moves = list(valid_moves)
     _root_rng.shuffle(root_moves)
 
+    # A forced move needs no deliberation: play it after one cheap iteration
+    # (which still produces a sane score for the review feature) and bank
+    # the entire budget for a move where thinking can change something.
+    if len(root_moves) == 1:
+        max_depth = 1
+
     best_move: MoveTuple | None = root_moves[0]
     best_score = -CHECKMATE_SCORE
 
     for depth in range(1, max_depth + 1):
+        # Soft stop: never abandon depth 1 (a move must exist), but don't
+        # start a deeper iteration that the remaining budget can't finish —
+        # see SOFT_STOP_FRACTION. The in-search hard abort stays as backstop.
+        if (depth > 1 and time.perf_counter() - info.start_time
+                > time_limit * SOFT_STOP_FRACTION):
+            break
         try:
             score, move = _aspiration_search(gs, root_moves, depth, info, best_score)
         except SearchTimeout:
