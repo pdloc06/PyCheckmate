@@ -311,6 +311,21 @@ SOFT_STOP_FRACTION = 0.45
 # blunder. The soft gate then widens to the full soft budget and the hard
 # abort moves out to the caller's hard limit (when one is given), letting
 # the search finish discovering what it started to see.
+#
+# This crude binary rule is better than it looks, and two attempts to improve
+# on it were measured and dropped. Scored by `engine.tm_replay` against the
+# bot's real games — how much longer it thinks on positions it actually
+# blundered versus positions it played well — this rule gets 1.34x. Making
+# the response continuous *and* adding a root best-move stability signal got
+# 1.11x; keeping only the continuous part plus an early-exit discount for
+# settled searches got 1.36x, indistinguishable from doing nothing.
+#
+# The reason the stability signal backfires is worth keeping: in quiet
+# endgames the root best move flaps between moves of *identical* score, so it
+# reads as maximally unstable exactly where there is least to think about,
+# while a sharp position the engine happens to see clearly reads as calm.
+# Move-changes are a poor difficulty signal for this engine; a collapsing
+# score is a good one. Anything built here should extend the latter.
 PANIC_SCORE_DROP = 60
 
 # Aspiration windows: from this depth on, re-search around the previous
