@@ -6,7 +6,7 @@ UCI adapter helpers.
 from engine import move_finder
 from engine import uci
 from engine.chess_engine import (
-    GameState, Move, PAWN, BISHOP, WP, WN, WB, BP,
+    GameState, Move, PAWN, BISHOP, WP, WN, WB, WR, WQ, BP,
 )
 
 
@@ -264,20 +264,22 @@ def test_passed_pawn_bonus(custom_gs):
     # (the d6 pawn itself is not passed: the e5 pawn stands ahead of it),
     # minus the isolated-pawn penalty the lone d6 pawn drags with it. The
     # white e-pawn is equally isolated in both positions, so its penalty
-    # cancels out of the difference.
+    # cancels out of the difference. With only kings and pawns on the board
+    # the tapered phase is 0, so the *endgame* passed-pawn column applies
+    # in full.
     expected_delta = (move_finder.PIECE_VALUES[WP] + move_finder.PST[PAWN][5][3]
-                      + move_finder.PASSED_PAWN_BONUS[3]
+                      + move_finder.PASSED_PAWN_BONUS_END[3]
                       - move_finder.ISOLATED_PAWN_PENALTY)
     assert passed - blocked == expected_delta
 
 
 def test_king_pawn_shield_bonus(custom_gs):
-    """Verify a castled king's pawn cover counts in the middlegame.
+    """Verify a castled king's pawn cover counts while attackers remain.
 
-    Queens and rooks keep the position above the endgame threshold; the only
+    Queens and rooks keep the tapered phase well above zero; the only
     difference between the two evaluations is the g-pawn standing on g2
     (shielding) versus g4 (not shielding), so the delta is its PST change
-    plus one shield bonus.
+    plus one shield bonus scaled by the position's phase.
     """
     base = [['--' for _ in range(8)] for _ in range(8)]
     base[7][6] = 'wK'  # g1
@@ -296,8 +298,14 @@ def test_king_pawn_shield_bonus(custom_gs):
     shielded = move_finder.evaluate(custom_gs(shielded_board))
     advanced = move_finder.evaluate(custom_gs(advanced_board))
 
+    # Phase from the non-pawn material actually on the board (Q + R each
+    # side), exactly as evaluate() computes it; the shield bonus is scaled
+    # by phase/PHASE_MAX before the integer division floors it.
+    non_pawn = 2 * (move_finder.PIECE_VALUES[WQ] + move_finder.PIECE_VALUES[WR])
+    phase = min(move_finder.PHASE_MAX,
+                non_pawn * move_finder.PHASE_MAX // move_finder.PHASE_MATERIAL_MAX)
     expected_delta = (move_finder.PST[PAWN][6][6] - move_finder.PST[PAWN][4][6]
-                      + move_finder.KING_SHIELD_BONUS)
+                      + move_finder.KING_SHIELD_BONUS * phase // move_finder.PHASE_MAX)
     assert shielded - advanced == expected_delta
 
 

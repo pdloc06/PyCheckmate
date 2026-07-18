@@ -154,8 +154,21 @@ KING_END_PST: tuple[tuple[int, ...], ...] = (
     (-50, -30, -30, -30, -30, -30, -30, -50),
 )
 
-# Below this much non-pawn material on the board, king tables switch to endgame
-ENDGAME_MATERIAL_THRESHOLD = 2600
+# Tapered evaluation (step 8): instead of one hard "now it's an endgame"
+# switch, phase-dependent terms blend smoothly between their middlegame and
+# endgame values as pieces come off. The phase is the fraction of non-pawn
+# material still on the board, scaled to 0-256 (256 = everything still on;
+# integer arithmetic so the hot loop never touches floats). A hard threshold
+# makes the eval jump discontinuously when one exchange crosses it — the
+# search then sees phantom score swings for trades that change nothing.
+PHASE_MAX = 256
+# Both sides' full non-pawn complement: 2 each of N/B/R plus a queen, twice.
+PHASE_MATERIAL_MAX = 2 * (2 * 320 + 2 * 330 + 2 * 500 + 900)
+
+# Passed pawns promote in endgames; with heavy pieces still on, the same
+# passer is often just a target. PASSED_PAWN_BONUS (above) serves as the
+# middlegame column; this endgame column raises the stakes by half again.
+PASSED_PAWN_BONUS_END = (0, 180, 120, 75, 45, 30, 15, 0)
 
 # Transposition table bound flags
 TT_EXACT, TT_LOWER, TT_UPPER = 0, 1, 2
@@ -988,12 +1001,15 @@ def evaluate(gs: GameState) -> int:
     Static evaluation of the position from White's perspective.
 
     Combines raw material with piece-square table bonuses, plus the step 6
-    refinements: a bishop-pair bonus, passed-pawn bonuses that grow as the
-    pawn advances, a middlegame king pawn-shield bonus, and a hard zero for
-    positions where neither side has enough material to mate (so the bot
-    offers/accepts draws sensibly online). Kings switch from a
-    safety-oriented table to a centralization table once the total non-pawn
-    material drops below the endgame threshold.
+    refinements — a bishop-pair bonus, passed-pawn bonuses that grow as the
+    pawn advances, a king pawn-shield bonus, and a hard zero for positions
+    where neither side has enough material to mate (so the bot offers/
+    accepts draws sensibly online) — and the step 8 terms: rook bonuses on
+    semi-open/open files and the 7th rank, and doubled/isolated pawn
+    penalties. Phase-sensitive terms (king tables, passed pawns, the pawn
+    shield) are *tapered*: blended between middlegame and endgame values by
+    the fraction of non-pawn material remaining, so no single exchange can
+    step the score discontinuously.
 
     Parameters
     ----------
@@ -1105,30 +1121,40 @@ def evaluate(gs: GameState) -> int:
         if row == 6:
             score -= ROOK_ON_SEVENTH_BONUS
 
+    # Game phase for the tapered terms below: 256 with all non-pawn material
+    # on the board, 0 when only kings and pawns remain, linear in between.
+    phase = min(PHASE_MAX, non_pawn_material * PHASE_MAX // PHASE_MATERIAL_MAX)
+    end_phase = PHASE_MAX - phase
+
     for row, col in white_pawns:
         if (black_min_row[col] >= row
                 and black_min_row[col + 1] >= row
                 and black_min_row[col + 2] >= row):
-            score += PASSED_PAWN_BONUS[row]
+            score += (PASSED_PAWN_BONUS[row] * phase
+                      + PASSED_PAWN_BONUS_END[row] * end_phase) // PHASE_MAX
 
     for row, col in black_pawns:
         if (white_max_row[col] <= row
                 and white_max_row[col + 1] <= row
                 and white_max_row[col + 2] <= row):
-            score -= PASSED_PAWN_BONUS[7 - row]
+            score -= (PASSED_PAWN_BONUS[7 - row] * phase
+                      + PASSED_PAWN_BONUS_END[7 - row] * end_phase) // PHASE_MAX
 
-    is_endgame = non_pawn_material <= ENDGAME_MATERIAL_THRESHOLD
-    king_table = KING_END_PST if is_endgame else KING_MID_PST
+    # The kings' tables blend the same way: the safety table dominates while
+    # attackers remain, the centralization table takes over as they vanish.
     wk_row, wk_col = gs.white_king_location
     bk_row, bk_col = gs.black_king_location
-    score += king_table[wk_row][wk_col]
-    score -= king_table[7 - bk_row][bk_col]
+    score += (KING_MID_PST[wk_row][wk_col] * phase
+              + KING_END_PST[wk_row][wk_col] * end_phase) // PHASE_MAX
+    score -= (KING_MID_PST[7 - bk_row][bk_col] * phase
+              + KING_END_PST[7 - bk_row][bk_col] * end_phase) // PHASE_MAX
 
-    # Pawn shield: only meaningful while enough material remains to attack
-    # the king; in the endgame the king should leave its shelter anyway.
-    if not is_endgame:
-        score += KING_SHIELD_BONUS * _pawn_shield(board, wk_row, wk_col, WP, -1)
-        score -= KING_SHIELD_BONUS * _pawn_shield(board, bk_row, bk_col, BP, 1)
+    # Pawn shield: scaled by phase rather than switched off at a threshold —
+    # shelter matters exactly as much as there are attackers left to fear.
+    if phase:
+        shield = (KING_SHIELD_BONUS * _pawn_shield(board, wk_row, wk_col, WP, -1)
+                  - KING_SHIELD_BONUS * _pawn_shield(board, bk_row, bk_col, BP, 1))
+        score += shield * phase // PHASE_MAX
 
     return score
 
