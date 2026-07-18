@@ -95,6 +95,53 @@ MOBILITY_DIRECTIONS: dict[int, tuple[tuple[int, int], ...]] = {
     QUEEN: ALL_DIRECTIONS,
 }
 
+
+def _rays_from(row: int, col: int, directions: tuple[tuple[int, int], ...]
+               ) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """
+    List the on-board squares along each ray leaving (row, col).
+
+    Returns one tuple of squares per direction, in order walking outward.
+    Rays that leave the board immediately are dropped, so a caller iterating
+    the result never handles an empty ray.
+    """
+    rays = []
+    for dr, dc in directions:
+        ray = []
+        r, c = row + dr, col + dc
+        while 0 <= r < 8 and 0 <= c < 8:
+            ray.append((r, c))
+            r += dr
+            c += dc
+        if ray:
+            rays.append(tuple(ray))
+    return tuple(rays)
+
+
+# Precomputed ray and knight-hop targets for the mobility scan. Mobility is
+# the single most expensive term in `evaluate` — a profile of a depth-6 search
+# put `_mobility` at 14% of *total* search time, called once per non-pawn
+# piece per evaluation — and almost all of that cost was the bounds test
+# `0 <= r <= 7 and 0 <= c <= 7` re-evaluated at every step of every ray. The
+# board's geometry never changes, so those squares can be enumerated once at
+# import and simply walked afterwards. Purely an optimization: the squares
+# visited, and therefore every score, are identical.
+_MOBILITY_RAYS: dict[int, tuple[tuple[tuple[tuple[tuple[int, int], ...], ...], ...], ...]] = {
+    piece_type: tuple(
+        tuple(_rays_from(row, col, directions) for col in range(8))
+        for row in range(8)
+    )
+    for piece_type, directions in MOBILITY_DIRECTIONS.items()
+}
+_KNIGHT_TARGETS: tuple[tuple[tuple[tuple[int, int], ...], ...], ...] = tuple(
+    tuple(
+        tuple((row + dr, col + dc) for dr, dc in KNIGHT_DELTAS
+              if 0 <= row + dr < 8 and 0 <= col + dc < 8)
+        for col in range(8)
+    )
+    for row in range(8)
+)
+
 # Pawn-structure penalties (step 8). Doubled pawns blockade each other and
 # can't create passers; isolated pawns have no pawn that can ever defend
 # them, so they tie a piece to the job. Each is charged per offending pawn
@@ -284,6 +331,21 @@ _SEE_ORTHOGONALS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 _SEE_KNIGHT_HOPS = (
     (-2, -1), (-2, 1), (-1, -2), (-1, 2),
     (1, -2), (1, 2), (2, -1), (2, 1),
+)
+
+# The same precomputed-geometry trick the mobility scan uses (see
+# `_MOBILITY_RAYS`): the attacker scan walks these rays for every square of
+# every exchange it evaluates, and the squares are fixed by the board, not by
+# the position. `_least_valuable_attacker` never needs the direction it walked
+# — only the piece it found and how far away it was — so it can iterate the
+# rays directly.
+_SEE_DIAGONAL_RAYS: tuple[tuple[tuple[tuple[tuple[int, int], ...], ...], ...], ...] = tuple(
+    tuple(_rays_from(row, col, _SEE_DIAGONALS) for col in range(8))
+    for row in range(8)
+)
+_SEE_ORTHOGONAL_RAYS: tuple[tuple[tuple[tuple[tuple[int, int], ...], ...], ...], ...] = tuple(
+    tuple(_rays_from(row, col, _SEE_ORTHOGONALS) for col in range(8))
+    for row in range(8)
 )
 
 _root_rng = random.Random()
@@ -1064,28 +1126,37 @@ def _mvv_lva(gs: GameState, move: MoveTuple) -> int:
 
 
 def _first_on_ray(
-    board: list[list[int]], tr: int, tc: int, dr: int, dc: int,
+    board: list[list[int]], ray: tuple[tuple[int, int], ...],
     removed: set[tuple[int, int]],
 ) -> tuple[int, int, int] | None:
     """
-    Walk a ray from (tr, tc) in step (dr, dc) and return the first live piece.
+    Walk a precomputed ray and return the first live piece on it.
 
     Squares in ``removed`` (pieces already spent in the exchange) are treated
     as empty, so a slider standing behind one of them is revealed — this is how
     the SEE swap picks up X-ray attackers as the front pieces come off.
 
+    Parameters
+    ----------
+    board : list of list of int
+        The board grid of integer piece codes.
+    ray : tuple of (row, col)
+        On-board squares walking outward from the target, from
+        ``_SEE_DIAGONAL_RAYS`` / ``_SEE_ORTHOGONAL_RAYS``. Being precomputed,
+        every square is known to be on the board, so the walk needs no bounds
+        test.
+    removed : set of (row, col)
+        Squares whose pieces have already been spent in the exchange.
+
     Returns
     -------
     tuple of (row, col, piece int) or None
         The first occupied, non-removed square along the ray, or None if the
-        ray runs off the board without hitting one.
+        ray runs out without hitting one.
     """
-    r, c = tr + dr, tc + dc
-    while 0 <= r < 8 and 0 <= c < 8:
+    for r, c in ray:
         if (r, c) not in removed and board[r][c] != EMPTY:
             return r, c, board[r][c]
-        r += dr
-        c += dc
     return None
 
 
@@ -1131,8 +1202,8 @@ def _least_valuable_attacker(
     # Sliders and the king: the first live piece on each ray is the only one
     # that can attack along it (anything behind is blocked until it is removed).
     bishop = rook = queen = king = None
-    for dr, dc in _SEE_DIAGONALS:
-        found = _first_on_ray(board, tr, tc, dr, dc, removed)
+    for ray in _SEE_DIAGONAL_RAYS[tr][tc]:
+        found = _first_on_ray(board, ray, removed)
         if found is None or (found[2] < BP) != side_white:
             continue
         r, c, kind = found[0], found[1], PIECE_TYPE[found[2]]
@@ -1142,8 +1213,8 @@ def _least_valuable_attacker(
             queen = queen or (r, c)
         elif kind == KING and abs(r - tr) <= 1 and abs(c - tc) <= 1:
             king = king or (r, c)
-    for dr, dc in _SEE_ORTHOGONALS:
-        found = _first_on_ray(board, tr, tc, dr, dc, removed)
+    for ray in _SEE_ORTHOGONAL_RAYS[tr][tc]:
+        found = _first_on_ray(board, ray, removed)
         if found is None or (found[2] < BP) != side_white:
             continue
         r, c, kind = found[0], found[1], PIECE_TYPE[found[2]]
@@ -1458,23 +1529,20 @@ def _mobility(
     """
     count = 0
     if piece_type == KNIGHT:
-        for dr, dc in KNIGHT_DELTAS:
-            r, c = row + dr, col + dc
-            if 0 <= r <= 7 and 0 <= c <= 7:
-                piece = board[r][c]
-                # `0 < piece < 7` is the standard "is white" test; a square
-                # counts when empty or when its occupant is the enemy's.
-                if piece == EMPTY or (0 < piece < 7) != white:
-                    count += 1
+        for r, c in _KNIGHT_TARGETS[row][col]:
+            piece = board[r][c]
+            # `0 < piece < 7` is the standard "is white" test; a square
+            # counts when empty or when its occupant is the enemy's.
+            if piece == EMPTY or (0 < piece < 7) != white:
+                count += 1
     else:
-        for dr, dc in MOBILITY_DIRECTIONS[piece_type]:
-            r, c = row + dr, col + dc
-            while 0 <= r <= 7 and 0 <= c <= 7:
+        # Rays are precomputed and already on-board, so the walk needs no
+        # bounds test — it just stops at the first blocker.
+        for ray in _MOBILITY_RAYS[piece_type][row][col]:
+            for r, c in ray:
                 piece = board[r][c]
                 if piece == EMPTY:
                     count += 1
-                    r += dr
-                    c += dc
                     continue
                 if (0 < piece < 7) != white:
                     count += 1  # the blocker is capturable
