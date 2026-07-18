@@ -27,6 +27,7 @@ from engine.chess_engine import (
     AI_PROMO_PIECES, AI_PROMO_TYPE, GameState, PIECE_TYPE,
     EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     WP, WN, WB, WR, WQ, WK, BP, BN, BB, BR, BQ, BK,
+    ALL_DIRECTIONS, DIAGONAL_DIRECTIONS, KNIGHT_DELTAS, ORTHOGONAL_DIRECTIONS,
 )
 
 # Type alias for the lightweight move format shared with chess_engine
@@ -76,6 +77,22 @@ BISHOP_PAIR_BONUS = 30
 ROOK_SEMI_OPEN_FILE_BONUS = 10
 ROOK_OPEN_FILE_BONUS = 20
 ROOK_ON_SEVENTH_BONUS = 20
+
+# Mobility (loss-review follow-up): a small bonus per square a piece can move
+# to or capture on. The 12-game loss review showed the bot losing by grind —
+# slightly passive pieces on every move rather than tactical mistakes — and
+# mobility is the classic cure: cramped positions score worse, so the search
+# starts preferring moves that give its pieces room and deny the opponent's.
+# Indexed by piece type. Knights gain most per square (eight is their whole
+# world), queens least (their raw counts are huge and mostly noise); pawns
+# score zero (their "mobility" is structure, handled above) and so do kings
+# (freedom to wander is not a middlegame asset).
+MOBILITY_BONUS = (0, 0, 4, 3, 2, 1, 0)
+MOBILITY_DIRECTIONS: dict[int, tuple[tuple[int, int], ...]] = {
+    BISHOP: DIAGONAL_DIRECTIONS,
+    ROOK: ORTHOGONAL_DIRECTIONS,
+    QUEEN: ALL_DIRECTIONS,
+}
 
 # Pawn-structure penalties (step 8). Doubled pawns blockade each other and
 # can't create passers; isolated pawns have no pawn that can ever defend
@@ -1192,6 +1209,7 @@ def evaluate(gs: GameState) -> int:
                 white_max_row[col + 1] = row
         else:
             non_pawn_material += PIECE_VALUES[piece]
+            score += MOBILITY_BONUS[piece_type] * _mobility(board, row, col, piece_type, True)
             if piece_type == BISHOP:
                 white_bishops += 1
             elif piece_type == ROOK:
@@ -1211,6 +1229,7 @@ def evaluate(gs: GameState) -> int:
                 black_min_row[col + 1] = row
         else:
             non_pawn_material += PIECE_VALUES[piece]
+            score -= MOBILITY_BONUS[piece_type] * _mobility(board, row, col, piece_type, False)
             if piece_type == BISHOP:
                 black_bishops += 1
             elif piece_type == ROOK:
@@ -1291,6 +1310,59 @@ def evaluate(gs: GameState) -> int:
         _EVAL_CACHE.clear()
     _EVAL_CACHE[key] = score
     return score
+
+
+def _mobility(
+    board: list[list[int]], row: int, col: int, piece_type: int, white: bool
+) -> int:
+    """
+    Count the squares a knight or sliding piece can move to or capture on.
+
+    A cheap pseudo-legal count: pins and checks are ignored (the search
+    resolves those), and a square counts if it is empty or holds an enemy
+    piece. Sliders stop at the first blocker, counting it when capturable.
+
+    Parameters
+    ----------
+    board : list of list of int
+        The board grid of integer piece codes.
+    row, col : int
+        The piece's square.
+    piece_type : int
+        One of KNIGHT, BISHOP, ROOK, QUEEN (pawns and kings score no
+        mobility, so they are never passed here).
+    white : bool
+        The piece's colour, deciding which occupants count as capturable.
+
+    Returns
+    -------
+    int
+        The number of reachable squares.
+    """
+    count = 0
+    if piece_type == KNIGHT:
+        for dr, dc in KNIGHT_DELTAS:
+            r, c = row + dr, col + dc
+            if 0 <= r <= 7 and 0 <= c <= 7:
+                piece = board[r][c]
+                # `0 < piece < 7` is the standard "is white" test; a square
+                # counts when empty or when its occupant is the enemy's.
+                if piece == EMPTY or (0 < piece < 7) != white:
+                    count += 1
+    else:
+        for dr, dc in MOBILITY_DIRECTIONS[piece_type]:
+            r, c = row + dr, col + dc
+            while 0 <= r <= 7 and 0 <= c <= 7:
+                piece = board[r][c]
+                if piece == EMPTY:
+                    count += 1
+                    r += dr
+                    c += dc
+                    continue
+                if (0 < piece < 7) != white:
+                    count += 1  # the blocker is capturable
+                break
+    return count
 
 
 def _pawn_shield(

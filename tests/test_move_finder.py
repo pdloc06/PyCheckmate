@@ -6,7 +6,7 @@ UCI adapter helpers.
 from engine import move_finder
 from engine import uci
 from engine.chess_engine import (
-    GameState, Move, PAWN, BISHOP, WP, WN, WB, WR, WQ, BP,
+    GameState, Move, PAWN, BISHOP, QUEEN, WP, WN, WB, WR, WQ, BP,
 )
 
 
@@ -241,10 +241,16 @@ def test_bishop_pair_bonus(custom_gs):
     one_bishop = move_finder.evaluate(custom_gs(empty_board))
 
     empty_board[4][5] = 'wB'
-    two_bishops = move_finder.evaluate(custom_gs([row[:] for row in empty_board]))
+    gs_two = custom_gs([row[:] for row in empty_board])
+    two_bishops = move_finder.evaluate(gs_two)
 
+    # The new bishop also brings its own mobility bonus. It stands on none of
+    # the first bishop's diagonals, so that bishop's mobility (and every other
+    # piece's) is identical in both positions and cancels out of the delta.
     expected_gain = (move_finder.PIECE_VALUES[WB] + move_finder.PST[BISHOP][4][5]
-                     + move_finder.BISHOP_PAIR_BONUS)
+                     + move_finder.BISHOP_PAIR_BONUS
+                     + move_finder.MOBILITY_BONUS[BISHOP]
+                     * move_finder._mobility(gs_two.board, 4, 5, BISHOP, True))
     assert two_bishops - one_bishop == expected_gain
 
 
@@ -295,8 +301,10 @@ def test_king_pawn_shield_bonus(custom_gs):
     advanced_board = [row[:] for row in base]
     advanced_board[4][6] = 'wP'  # g4
 
-    shielded = move_finder.evaluate(custom_gs(shielded_board))
-    advanced = move_finder.evaluate(custom_gs(advanced_board))
+    gs_shielded = custom_gs(shielded_board)
+    gs_advanced = custom_gs(advanced_board)
+    shielded = move_finder.evaluate(gs_shielded)
+    advanced = move_finder.evaluate(gs_advanced)
 
     # Phase from the non-pawn material actually on the board (Q + R each
     # side), exactly as evaluate() computes it; the shield bonus is scaled
@@ -304,8 +312,16 @@ def test_king_pawn_shield_bonus(custom_gs):
     non_pawn = 2 * (move_finder.PIECE_VALUES[WQ] + move_finder.PIECE_VALUES[WR])
     phase = min(move_finder.PHASE_MAX,
                 non_pawn * move_finder.PHASE_MAX // move_finder.PHASE_MATERIAL_MAX)
+    # The g-pawn's square also changes the white queen's mobility: on g4 it
+    # blocks her d1-h5 diagonal, on g2 it doesn't. No other piece's lines
+    # cross either pawn square, so the queen is the only mobility difference
+    # between the two boards.
+    mobility_delta = move_finder.MOBILITY_BONUS[QUEEN] * (
+        move_finder._mobility(gs_shielded.board, 7, 3, QUEEN, True)
+        - move_finder._mobility(gs_advanced.board, 7, 3, QUEEN, True))
     expected_delta = (move_finder.PST[PAWN][6][6] - move_finder.PST[PAWN][4][6]
-                      + move_finder.KING_SHIELD_BONUS * phase // move_finder.PHASE_MAX)
+                      + move_finder.KING_SHIELD_BONUS * phase // move_finder.PHASE_MAX
+                      + mobility_delta)
     assert shielded - advanced == expected_delta
 
 
