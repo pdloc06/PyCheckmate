@@ -692,3 +692,44 @@ only by search quality. That is a good ceiling to aim at and an honest one to
 state up front.
 
 **Re-run `calibrate.py` after every tier.** The number is the point.
+
+---
+
+## Part 8 — First rated-game finding (2026-07-20)
+
+Two rated games in, one win (rapid, vs 1909) and one loss (blitz 300+0, vs
+2197). The loss is worth recording because of *how* it was lost.
+
+Stockfish graded our play at **ACPL 14.0, accuracy 97.4%, zero blunders** — and
+we still lost. The whole game turned on one move:
+
+| Move | Played | cpl | Time spent | Eval before → after |
+| --- | --- | --- | --- | --- |
+| 29 | `f5f4` | **198** | 7.0s | −8 → +190 (White) |
+
+Everything after move 30 is losing a lost position, not new error.
+
+Position: `8/1p4p1/p1b4p/4ppk1/1PP5/1N3P2/P4KPP/8 b - - 2 29` — a
+bishop-vs-knight endgame, six pawns each.
+
+**It is not a time-management failure.** We spent 7.0s on it, generous for
+300+0, and used 248s of 300s over the game (83% — the new clock code working;
+the old one left 28–48% unspent).
+
+**It is not a depth failure.** Our engine reaches depth 11 in 7s here.
+
+**It is an evaluation failure, and a confident one.** We score `f5f4` at **+37
+in our own favour** while Stockfish plays `e5e4` and calls our move ~200cp
+worse. We then played `e5e4` ourselves on move 30 — the right idea, one move
+too late.
+
+Suspected gap: no bishop-quality terms at all — no bad-bishop penalty (pawns
+fixed on the bishop's colour), no knight outposts, no bishop-vs-knight
+imbalance. `KING_END_PST` and endgame passed-pawn scaling do exist, so the
+basic endgame scaffolding is there.
+
+**Deliberately not acted on yet.** This is n=1, and tuning evaluation from a
+single game is exactly the "hand-picked test cases lie" failure this project
+has already hit twice. The position is recorded here as a candidate test case;
+the question is whether bishop-vs-knight endgames are a *pattern* across the
+collected set. If they are, it moves ahead of Texel tuning in the queue.
