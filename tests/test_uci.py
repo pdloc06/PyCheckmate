@@ -39,12 +39,32 @@ def test_budget_grows_as_the_game_goes_on():
 
 
 def test_budget_hoards_when_the_clock_runs_low():
-    """Below LOW_CLOCK_SECONDS survival outranks thinking, so the same
+    """Below the low-clock tier survival outranks thinking, so the same
     position budgets a smaller *fraction* of what is left."""
-    low = uci.LOW_CLOCK_SECONDS - 1.0
+    low = uci.LOW_CLOCK_FRACTION * uci.REFERENCE_CLOCK_SECONDS - 1.0
     fraction_low = uci.clock_move_budget(int(low * 1000), 0, moves_played=40) / low
     fraction_normal = uci.clock_move_budget(120_000, 0, moves_played=40) / 120.0
     assert fraction_low < fraction_normal
+
+
+def test_hoarding_tier_scales_with_the_time_control():
+    """
+    The emergency tiers must engage at the same point in the *game* whatever
+    the clock, which is the whole reason they are fractions.
+
+    As absolute seconds they engaged at a fixed wall-clock moment but a moving
+    moment in the game -- around move 60 of a 5+0 game, around move 39 of a
+    90-second one. A match at any clock but the deployed one therefore
+    exercised different code than the one that ships, and two overnight
+    self-play gates were lost to exactly that.
+    """
+    # A tenth of the way into the low tier, on two clocks 20x apart.
+    for initial in (300.0, 15.0):
+        low_point = int(uci.LOW_CLOCK_FRACTION * initial * 0.9 * 1000)
+        normal_point = int(initial * 0.5 * 1000)
+        hoarding = uci.moves_to_go(low_point / 1000.0, 40, initial)
+        normal = uci.moves_to_go(normal_point / 1000.0, 40, initial)
+        assert hoarding > normal, f'tier did not engage at {initial}s'
 
 
 def test_budget_clamps_low_when_flagging():

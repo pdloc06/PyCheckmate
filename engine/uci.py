@@ -54,10 +54,27 @@ MIN_MOVES_TO_GO = 18      # floor on the estimate once the game runs long
 # clock: an earlier draft engaged below 60s, which in a 5+0 game meant it
 # started hoarding around move 35 — safe, and precisely inside the band where
 # the errors actually happen.
-LOW_CLOCK_SECONDS = 25.0
+# They are expressed as *fractions of the starting clock*, not as absolute
+# seconds, and that detail is load-bearing. As absolutes (25s and 10s) they
+# sat at a fixed point on the wall clock but a moving point in the *game*: in
+# 5+0 the low tier engaged around move 60, in a 90-second test game around
+# move 39 — inside the very band a change might be targeting. A self-play
+# match at any clock but the deployed one therefore measured different code
+# paths than the ones that ship, which is exactly how two overnight gates were
+# lost (see CLAUDE.md, "the self-play clock-fidelity trap").
+#
+# The fractions reproduce the old absolutes at the 5+0 they were tuned
+# against (25/300 and 10/300), so deployed behaviour there is unchanged;
+# 10+2 now scales with them instead of engaging twice as late.
+LOW_CLOCK_FRACTION = 25.0 / 300.0
 LOW_CLOCK_MOVES_TO_GO = 30
-PANIC_CLOCK_SECONDS = 10.0
+PANIC_CLOCK_FRACTION = 10.0 / 300.0
 PANIC_CLOCK_MOVES_TO_GO = 60
+
+# Used when the caller cannot say what the clock started at (the GUI, tests,
+# the self-play harness). Keeps their behaviour identical to the old
+# absolutes rather than making them guess.
+REFERENCE_CLOCK_SECONDS = 300.0
 
 # Time the engine never gets to use: Lichess round-trip, the bridge, and
 # process scheduling. Budgeting the full clock ignores it and loses games on
@@ -83,6 +100,10 @@ CLOCK_MAX_DEPTH = 64     # effectively unlimited: the clock is the real cap
 # moves' results, and cleared on `ucinewgame`. Zobrist keys identify
 # positions absolutely, so entries stay valid as the game advances.
 transposition_table: move_finder.TTable = {}
+
+# Clock this game started with, learned from the first `go` that carries clock
+# fields and cleared by `ucinewgame`. None until then. See `note_initial_clock`.
+_initial_clock_s: float | None = None
 # Safety valve for very long games: one entry is roughly a hundred bytes, so
 # this bounds the table at a few hundred MB before it is simply rebuilt.
 TT_MAX_ENTRIES = 2_000_000
@@ -157,7 +178,8 @@ def build_position(tokens: list[str]) -> chess_engine.GameState:
     return gs
 
 
-def moves_to_go(remaining_s: float, moves_played: int) -> int:
+def moves_to_go(remaining_s: float, moves_played: int,
+                initial_clock_s: float = REFERENCE_CLOCK_SECONDS) -> int:
     """
     Estimate how many more moves this side still has to play.
 
@@ -173,6 +195,11 @@ def moves_to_go(remaining_s: float, moves_played: int) -> int:
         Seconds left on this side's clock.
     moves_played : int
         How many moves this side has already played.
+    initial_clock_s : float, optional
+        Seconds this side's clock started the game with. The emergency tiers
+        are fractions of it, so they engage at the same *point in the game*
+        whatever the time control. Defaults to `REFERENCE_CLOCK_SECONDS` for
+        callers that cannot know it.
 
     Returns
     -------
@@ -180,15 +207,16 @@ def moves_to_go(remaining_s: float, moves_played: int) -> int:
         Divisor for the remaining clock: bigger means spend less now.
     """
     estimate = max(MIN_MOVES_TO_GO, EXPECTED_GAME_MOVES - moves_played)
-    if remaining_s < PANIC_CLOCK_SECONDS:
+    if remaining_s < PANIC_CLOCK_FRACTION * initial_clock_s:
         return max(estimate, PANIC_CLOCK_MOVES_TO_GO)
-    if remaining_s < LOW_CLOCK_SECONDS:
+    if remaining_s < LOW_CLOCK_FRACTION * initial_clock_s:
         return max(estimate, LOW_CLOCK_MOVES_TO_GO)
     return estimate
 
 
 def clock_move_budget(remaining_ms: int, increment_ms: int,
-                      moves_played: int = 0) -> float:
+                      moves_played: int = 0,
+                      initial_clock_s: float = REFERENCE_CLOCK_SECONDS) -> float:
     """
     Compute the thinking-time budget for one move from the game clock.
 
@@ -208,6 +236,8 @@ def clock_move_budget(remaining_ms: int, increment_ms: int,
     moves_played : int, optional
         Moves this side has already played, used to age the estimate of how
         many remain. Default 0 (treat the position as a game start).
+    initial_clock_s : float, optional
+        Seconds the clock started with; see `moves_to_go`.
 
     Returns
     -------
@@ -216,13 +246,15 @@ def clock_move_budget(remaining_ms: int, increment_ms: int,
     """
     remaining_s = remaining_ms / 1000.0
     usable = max(0.0, remaining_s - MOVE_OVERHEAD - CLOCK_RESERVE)
-    budget = (usable / moves_to_go(remaining_s, moves_played)
+    budget = (usable / moves_to_go(remaining_s, moves_played, initial_clock_s)
               + increment_ms / 1000.0 * INCREMENT_WEIGHT)
     return max(MIN_MOVE_TIME, min(MAX_MOVE_TIME, budget))
 
 
 def parse_go_limits(tokens: list[str], white_to_move: bool,
-                    moves_played: int = 0) -> tuple[int, float, float]:
+                    moves_played: int = 0,
+                    initial_clock_s: float = REFERENCE_CLOCK_SECONDS
+                    ) -> tuple[int, float, float]:
     """
     Derive search limits (max depth, time budget) from `go` arguments.
 
@@ -263,7 +295,8 @@ def parse_go_limits(tokens: list[str], white_to_move: bool,
     remaining = values.get('wtime' if white_to_move else 'btime')
     if movetime is None and remaining is not None:
         increment = values.get('winc' if white_to_move else 'binc', 0)
-        movetime = clock_move_budget(remaining, increment, moves_played)
+        movetime = clock_move_budget(remaining, increment, moves_played,
+                                     initial_clock_s)
         # Fund the panic extension from the clock, never endangering it:
         # the ceiling can't exceed a fixed fraction of what's actually left.
         hard = max(movetime, min(PANIC_HARD_FACTOR * movetime,
@@ -283,6 +316,45 @@ def parse_go_limits(tokens: list[str], white_to_move: bool,
     return (depth if depth is not None else DEFAULT_DEPTH,
             movetime,
             hard if hard is not None else movetime)
+
+
+def note_initial_clock(tokens: list[str], white_to_move: bool) -> float:
+    """
+    Remember (and return) the clock this game started with.
+
+    UCI never states the time control — every `go` reports only what is left.
+    The starting clock is therefore recovered from the first `go` of a game
+    that carries clock fields, and `ucinewgame` clears it for the next one.
+
+    Parameters
+    ----------
+    tokens : list of str
+        Arguments after `go`.
+    white_to_move : bool
+        Which side's clock to read.
+
+    Returns
+    -------
+    float
+        Seconds the clock started with, or `REFERENCE_CLOCK_SECONDS` when
+        this `go` carries no clock at all (a `movetime` or `depth` search).
+
+    Notes
+    -----
+    If the engine process is restarted mid-game the first clock it sees is a
+    partly-spent one, so the tiers scale to that instead. The effect is to
+    engage them *earlier* — the safe direction — and a restart mid-game is
+    already an unusual event.
+    """
+    global _initial_clock_s
+    if _initial_clock_s is None:
+        key = 'wtime' if white_to_move else 'btime'
+        for i, token in enumerate(tokens):
+            if token == key and i + 1 < len(tokens):
+                _initial_clock_s = int(tokens[i + 1]) / 1000.0
+                break
+    return (_initial_clock_s if _initial_clock_s is not None
+            else REFERENCE_CLOCK_SECONDS)
 
 
 def report_iteration(depth: int, score: int, nodes: int, elapsed: float,
@@ -358,7 +430,9 @@ def handle_go(gs: chess_engine.GameState, tokens: list[str]) -> str:
     # Each side has played half the plies in the log; the budget uses that to
     # age its estimate of how many moves are still to come.
     depth, movetime, hard = parse_go_limits(tokens, gs.white_to_move,
-                                            len(gs.move_log) // 2)
+                                            len(gs.move_log) // 2,
+                                            note_initial_clock(tokens,
+                                                               gs.white_to_move))
     board = gs.board
     best = move_finder.find_best_move(
         gs, max_depth=depth, time_limit=movetime, tt=transposition_table,
@@ -398,6 +472,9 @@ def main() -> None:
             gs = chess_engine.GameState()
             # A new game means new positions: drop the accumulated table
             transposition_table.clear()
+            # ...and a possibly different time control, so re-learn the clock.
+            global _initial_clock_s
+            _initial_clock_s = None
 
         elif command == 'position':
             try:

@@ -54,13 +54,23 @@ from engine.uci_client import PROJECT_ROOT, resolve_engine_command
 # The book ships with the repo so a test is reproducible from a clean clone.
 DEFAULT_BOOK = os.path.join(PROJECT_ROOT, 'books', 'uho_5000.epd')
 
-# 10+0.1 is the field's usual short time control for search/eval work: long
-# enough that iterative deepening behaves like a real game, short enough to
-# accumulate games at a useful rate. Anything touching the *clock* must be
-# tested at the deployed control instead -- absolute thresholds like
-# LOW_CLOCK_SECONDS relocate when the clock is scaled, which is the trap that
-# cost v1 two overnight matches. See CLAUDE.md.
-DEFAULT_TC = '10+0.1'
+# 60+0 is a faithful scale model of the deployed 5+0, and picking it is not
+# arbitrary. Two separate things distort a scaled-down clock:
+#
+# 1. The hoarding tiers. These used to be absolute seconds, so shrinking the
+#    clock moved them to a different point in the *game* -- the trap that cost
+#    two overnight gates. They are now fractions of the starting clock
+#    (`uci.LOW_CLOCK_FRACTION`), so they scale correctly and no longer
+#    constrain the choice.
+# 2. `MOVE_OVERHEAD` + `CLOCK_RESERVE` (1.15s). These are *genuinely* absolute
+#    -- network latency does not shrink with the clock -- so they cannot be
+#    made relative, and they eat a growing share of a smaller clock:
+#
+#        300s -> 0.4%    120s -> 1.0%    60s -> 1.9%    10s -> 11.5%
+#
+# 60s keeps that under 2% while running games ~5x faster than the deployed
+# control. Below ~60s the engine is measurably playing a different game.
+DEFAULT_TC = '60+0'
 
 # elo0=0 / elo1=5 asks "is this worth at least 5 Elo?", the customary bounds
 # for an incremental change. alpha/beta are the false-positive and
