@@ -733,3 +733,66 @@ single game is exactly the "hand-picked test cases lie" failure this project
 has already hit twice. The position is recorded here as a candidate test case;
 the question is whether bishop-vs-knight endgames are a *pattern* across the
 collected set. If they are, it moves ahead of Texel tuning in the queue.
+
+---
+
+## Part 9 — Piece-quality evaluation (queued, starts with research)
+
+### Why: the audit
+
+The evaluation understands **pawns and rooks**. It barely understands
+**knights and bishops**, in either phase.
+
+| Piece | Midgame terms | Endgame terms |
+| --- | --- | --- |
+| Pawn | doubled, isolated, passed | passed (scaled up) |
+| Rook | open / semi-open file, 7th rank | same (not phase-aware) |
+| King | PST + pawn shield | endgame PST |
+| **Knight** | **mobility only** | **mobility only** |
+| **Bishop** | **mobility + pair bonus** | **mobility + pair bonus** |
+| Queen | mobility only | mobility only |
+
+Missing entirely, in both phases: knight outposts, bad bishop (own pawns fixed
+on the bishop's colour), bishop-vs-knight imbalance by pawn structure, threats
+and hanging pieces, rook behind a passed pawn, king proximity to passed pawns.
+
+This is not an endgame-specific gap. It looked like one because the first
+rated loss happened to be a bishop-vs-knight endgame (Part 8), but the same
+blindness applies from move 15.
+
+### Order of work
+
+**Stage 0 — research first, before writing any term.** Read how established
+engines score piece quality: outpost definitions, bad-bishop formulations,
+B-vs-N imbalance tables, threat evaluation, and endgame-specific scaling.
+Chessprogramming wiki plus one or two open engines with readable evaluation.
+The point is to *not* invent heuristics from intuition — this project has now
+twice hand-labelled positions and got them backwards. Write down what the
+field does and why before choosing.
+
+**Stage 1 — decide what the collected games justify.** By then the 2-day
+version-`daecc23` set exists, graded by Stockfish. Look for the *pattern*: are
+B-vs-N endgames actually where we bleed, or was Part 8 a single bad game? Rank
+the candidate terms by how often each would have changed a move we actually
+lost by. This is what stops it being intuition-led.
+
+**Stage 2 — implement one term at a time, each behind its own SPRT.** Never
+two in flight. Candidate order, subject to what Stage 1 says:
+
+1. Knight outposts (protected, on a square no enemy pawn can attack)
+2. Bad bishop (penalty scaled by own pawns on the bishop's colour)
+3. Threats / hanging pieces
+4. Bishop-vs-knight imbalance keyed on pawn-structure openness
+5. Rook behind passed pawn; king proximity to passed pawns (endgame)
+
+**Stage 3 — re-calibrate** with `engine/calibrate.py` and compare against the
+~2133 baseline.
+
+### The trap to avoid
+
+Every term here is tempting to "obviously" get right by reasoning. The
+project's own history says otherwise: `test_node_count` and the stability
+heuristic were both built on confident intuitions that measured backwards.
+Research first, then let the collected games rank the candidates, then SPRT
+each one alone. A term that measures neutral gets reverted even if it is
+"clearly correct" chess.
