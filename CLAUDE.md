@@ -167,6 +167,13 @@ where we went wrong" are all recoverable without re-searching.
 **Never average across `engine_version`.** That is the same error as the casual
 games, one level down: a mean over two different engines describes neither.
 
+**Do not commit engine changes while the bot is running.** `sf_watch` reads the
+git revision once at startup, but lichess-bot spawns the engine fresh from the
+working tree for every game — so an engine commit mid-run means later games play
+*new* code while being stamped with the *old* revision, and the records lie
+without any warning. Docs-only commits are safe. To ship an engine change:
+`bot down`, commit, `bot up` (which records a new version cut).
+
 ## Tests
 
 Fixtures in `tests/conftest.py`: `gs` (fresh start position), `custom_gs(board, white_turn=...)` (hand-built board; calls `refresh_derived_state()` for you), `empty_kings_gs`. Engine correctness is anchored by perft node counts — start position depths 1–4 (20 / 400 / 8,902 / 197,281) plus the Kiwipete stress position — in `tests/test_ai_interface.py`; after any change to move generation or make/unmake, those and the random-walk tests are the safety net.
