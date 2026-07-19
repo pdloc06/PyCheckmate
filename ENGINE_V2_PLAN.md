@@ -574,9 +574,121 @@ to work on this engine, and they are the part v1 genuinely lacked. Part 5's
 build order applies only if we decide to rebuild anyway — it is kept as the
 plan of record for that case, not as the recommendation.
 
-### The one-line version
+### The one-line version (of Part 6)
 
 We spent the project optimising an engine we had never measured, against
 opponents it could not beat, using instruments that could not detect the
 difference. The engine was fine. Fix the scoreboard first.
 
+
+---
+
+## Part 7 — Getting past 2130
+
+Four new diagnostics, run after the calibration landed, say where the Elo is.
+
+### 7.1 The engine throws away a third of its clock
+
+Measured over six realistic positions, time actually spent vs budget given:
+
+| Budget | Used (mean) | Utilisation |
+| --- | --- | --- |
+| 3.0s | 1.73s | **58%** |
+| 5.0s | 3.44s | **69%** |
+
+Two causes, both in `search_position`:
+
+1. `SOFT_STOP_FRACTION = 0.45` refuses to *start* an iteration once 45% of the
+   budget is gone. Iterations grow ~3-5x, so this fires constantly.
+2. `except SearchTimeout: break` **discards the entire partial iteration.**
+   Everything computed at depth N+1 before the clock ran out is thrown away.
+
+Cause 2 is what makes cause 1 necessary — starting an iteration you can't
+finish is only wasteful *because* the partial result is binned. The standard
+fix is to keep a running best at the root: since root moves are re-ordered with
+the previous best first, a partial iteration either confirms the best move or
+finds something better, and both are useful. Then the soft-stop gate can move
+much closer to 1.0.
+
+Recovering this is roughly a 1.5x effective time multiplier, worth ~+30-50 Elo,
+for a small diff in one function.
+
+### 7.2 Errors cluster in the early middlegame
+
+Stockfish depth-12, our moves only, all 43 games, bucketed by move number:
+
+| Moves | ACPL | Blunders | Sample |
+| --- | --- | --- | --- |
+| 1-15 | **13.3** | 1 | 645 |
+| 16-30 | **30.2** | 5 | 611 |
+| 31-45 | 28.1 | 3 | 415 |
+| 46+ | 24.1 | 1 | 292 |
+
+The opening is clean — the polyglot book is doing its job. Play degrades
+sharply the moment the book runs out and the position is still complex, and
+half the blunders land in moves 16-30. That is the band where king safety and
+depth decide games, and it is exactly where our evaluation is thinnest.
+
+### 7.3 The engine is unobservable in production
+
+`engine/uci.py` emits **no `info` lines at all** — no depth, no score, no nodes,
+no pv. Lichess shows nothing, and there is no way to know what depth a real
+game reached. Every diagnostic above had to be reconstructed offline. This is
+0 Elo directly and a prerequisite for everything else.
+
+### 7.4 Free endgame perfection is switched off
+
+`<lichess-bot>/config.yml` has `online_egtb: enabled: false`. Lichess serves a
+7-piece Syzygy tablebase over HTTP; enabling it gives *perfect* play in any
+position with <=7 pieces. Our 46+ move ACPL is 24.1, so there is real money
+here, and it costs one config line.
+
+### 7.5 Roadmap, ordered by Elo per unit of effort
+
+**Tier 0 — prerequisites (no Elo, unlocks everything)**
+
+| Item | Effort |
+| --- | --- |
+| SPRT harness (`fastchess`, elo0=0 elo1=5) | half a day |
+| `info depth/score/nodes/nps/pv` in `uci.py` | an hour |
+
+**Tier 1 — cheap and high-confidence**
+
+| # | Item | Est. Elo | Effort |
+| --- | --- | --- | --- |
+| 1 | Enable `online_egtb` | free, real | 1 config line |
+| 2 | Keep partial iteration results + raise the soft-stop gate (§7.1) | +30-50 | small diff |
+
+**Tier 2 — real strength work**
+
+| # | Item | Est. Elo | Effort |
+| --- | --- | --- | --- |
+| 3 | Texel-tune the 34 constants + PSTs | +50-100 | 2-3 days |
+| 4 | King safety (attacker count/weight on king zone) | meaningful, targets §7.2 | 1-2 days |
+| 5 | Incremental eval accumulator (removes the 22% slice) | +0.3 ply | 1-2 days |
+
+**Tier 3 — depth**
+
+| # | Item | Est. Elo |
+| --- | --- | --- |
+| 6 | Staged movegen (no quiets when the TT move cuts off) | node-count win |
+| 7 | Singular extensions | ~36 |
+| 8 | Re-derive LMR/futility margins by tuning, not guessing | unknown, currently unmeasured |
+| 9 | Capture history + history gravity in ordering | fewer nodes |
+
+**Tier 4 — the wall**
+
+NNUE is where meaningful further gains live, and it is also where pure Python
+stops cooperating: inference needs fast vector math, which means numpy for the
+accumulator and a real risk that per-move overhead eats the evaluation gain.
+This is a project in itself, not a stage. Worth attempting only after Tiers 0-3
+are exhausted and re-calibrated.
+
+### 7.6 Realistic target
+
+Tiers 0-3 plausibly land **2400-2600**. Beyond that, a pure-Python engine is
+fighting arithmetic: ~1M nps under PyPy against Stockfish's 100M+, compensated
+only by search quality. That is a good ceiling to aim at and an honest one to
+state up front.
+
+**Re-run `calibrate.py` after every tier.** The number is the point.
