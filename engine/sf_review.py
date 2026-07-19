@@ -1,11 +1,12 @@
 """
 Grade the bot's real games with Stockfish, not with ourselves.
 
-`engine.tm_replay` scores the bot's games using *our own* search. That is
-useful for relative before/after comparisons, but it has a structural blind
-spot: it cannot see a mistake our engine does not understand. If the engine
-misjudges a position, it misjudges it identically when playing and when
-grading, and the move looks fine both times.
+An engine cannot grade itself. The retired `tm_replay`/`tm_allocate` pair
+scored the bot's games with *our own* search, which was useful for relative
+before/after comparisons but had a structural blind spot: it could not see a
+mistake our engine does not understand. If the engine misjudges a position, it
+misjudges it identically when playing and when grading, and the move looks
+fine both times.
 
 Stockfish is an independent, far stronger referee, so its verdict is the
 one worth trusting about *how well we actually played*. This module drives

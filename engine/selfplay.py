@@ -45,7 +45,7 @@ from engine.uci_client import (
 # clock always ends the search first. Measurement said otherwise: at a 0.2s
 # budget, depth 6 completed naturally in 4 of 7 realistic positions — every
 # endgame and most late middlegames — leaving the engine idle on the rest of
-# its time. That quietly capped what `engine.abtest` could measure, because a
+# its time. That quietly capped what the A/B harness could measure, because a
 # faster engine in a cap-bound position has nowhere to spend the speed, so
 # speed-oriented changes read as 0 Elo however much they really help. It now
 # sits above what the budget can reach, leaving the clock as the only binding
@@ -62,7 +62,7 @@ def random_opening(plies: int, rng: random.Random) -> list[str]:
     Build a random legal opening line, as UCI move strings.
 
     Used to give a *pair* of games a shared starting position (see
-    `engine.abtest`). The line does not need to be balanced or sensible —
+    `engine.sprt`). The line does not need to be balanced or sensible —
     because the pair plays it from both sides, any advantage baked into it
     is handed to each engine exactly once and cancels out. What it must be
     is *legal* and *unfinished*, so both games start from a real position

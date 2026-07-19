@@ -323,7 +323,8 @@ SOFT_STOP_FRACTION = 0.9
 # the search finish discovering what it started to see.
 #
 # This crude binary rule is better than it looks, and two attempts to improve
-# on it were measured and dropped. Scored by `engine.tm_replay` against the
+# on it were measured and dropped. Scored (by the since-retired `tm_replay`)
+# against the
 # bot's real games — how much longer it thinks on positions it actually
 # blundered versus positions it played well — this rule gets 1.34x. Making
 # the response continuous *and* adding a root best-move stability signal got

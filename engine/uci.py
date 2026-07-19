@@ -33,7 +33,7 @@ DEFAULT_MOVETIME = 5.0  # seconds
 # play*, rather than by a constant. A constant divisor is what this used to do
 # (`remaining / 30`), and it has a subtle failure: dividing by a fixed number
 # decays geometrically, so the clock is never actually spent. Replaying the
-# bot's 16 online games (`engine.tm_replay`) showed it finishing *sixty-move*
+# bot's 16 online games showed it finishing *sixty-move*
 # games with 28-48% of its clock unused — it was effectively playing a faster
 # time control than the one it had been given, while blundering in positions
 # where more thought was available and simply not taken.

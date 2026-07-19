@@ -224,3 +224,7 @@ CHESS_ENGINE_GUIDE.md
 
 # Claude Code local settings and scratch worktrees
 .claude/
+
+# fastchess writes its adjudication settings into the working directory
+config.json
+.DS_Store

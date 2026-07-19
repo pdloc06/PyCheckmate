@@ -12,9 +12,31 @@ set -u
 DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"   # resolve symlinks: paths must be the real clone's
 PIDFILE="$DIR/bot.pid"
 LOG="$DIR/bot.log"
+# The Stockfish analysis watcher runs alongside the bot: it grades each game
+# in the idle gap after it finishes, so a multi-day unattended run arrives
+# with its analysis already done. It lives in the PyCheckmate repo's venv, not
+# lichess-bot's, so the venv sweep below cannot see it -- hence its own pid.
+ENGINE_DIR="$HOME/PycharmProjects/PyCheckmate"
+WATCHPID="$DIR/sf_watch.pid"
+WATCHLOG="$HOME/.local/share/pycheckmate/sf_watch.log"
 MATCH="$DIR/.venv"   # every bot process (main + children) runs this venv's python
 
 alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+# The watcher is launched through `uv run`, which forks, so the pid the
+# shell sees is a wrapper rather than the python process. Matching on the
+# module path finds the real one and needs no pidfile to go stale.
+watch_procs() { pgrep -f "engine.sf_watch" 2>/dev/null; }
+watch_alive() { [ -n "$(watch_procs)" ]; }
+
+stop_watch() {
+    pkill -f "engine.sf_watch" 2>/dev/null
+    for _ in 1 2 3 4 5; do
+        [ -z "$(watch_procs)" ] && break
+        sleep 1
+    done
+    pkill -9 -f "engine.sf_watch" 2>/dev/null
+    rm -f "$WATCHPID"
+}
 procs() { pgrep -f "$MATCH" 2>/dev/null; }
 
 sweep() {
@@ -47,24 +69,93 @@ up)
     # caffeinate -s keeps the Mac awake (on AC power) while the bot runs.
     nohup caffeinate -s "$DIR/run.sh" >> "$LOG" 2>&1 &
     echo $! > "$PIDFILE"
-    echo "started (pid $(cat "$PIDFILE")), keeping Mac awake — 'bot log' to watch, 'bot down' to stop"
+    # Only grade games this engine build actually played. --since auto anchors
+    # the cut to when this build was first deployed, not to process start, so
+    # restarting never orphans a game that finished just before a shutdown --
+    # while a new build still begins a clean set. Each record is stamped with
+    # the build, so one file can never average two engines.
+    mkdir -p "$(dirname "$WATCHLOG")"
+    ( cd "$ENGINE_DIR" && PYTHONPATH=. nohup uv run --no-project python -u \
+        -m engine.sf_watch --since auto >> "$WATCHLOG" 2>&1 & )
+    sleep 3
+    echo "started (pid $(cat "$PIDFILE")), keeping Mac awake"
+    if watch_alive; then
+        echo "analysis watcher ($(watch_procs | tr '\n' ' ')) grading games as they finish"
+    else
+        echo "WARNING: analysis watcher did not start -- see $WATCHLOG"
+    fi
+    echo "'bot log' to watch, 'bot down' to stop both"
     ;;
 down)
+    force=0
+    [ "${2:-}" = "now" ] && force=1
+
+    # Graceful by default: killing mid-game forfeits it, and killing the
+    # watcher mid-analysis loses that game's record entirely (a record is only
+    # written once the whole game is graded). So wait for both to reach a
+    # clean point, and say so on screen -- a silent wait is indistinguishable
+    # from a hang.
+    if [ "$force" -eq 0 ] && alive; then
+        waited=0
+        while pgrep -f "engine.uci" >/dev/null 2>&1; do
+            printf "\rwaiting for the current game to finish... %dm%02ds  (bot down now = don't wait)" \
+                $((waited / 60)) $((waited % 60))
+            sleep 5
+            waited=$((waited + 5))
+        done
+        [ "$waited" -gt 0 ] && printf "\rgame finished after %dm%02ds%-30s\n" \
+            $((waited / 60)) $((waited % 60)) ""
+    fi
+
+    # Stop the bot first so no new game can start while the analysis drains.
+    sweep_done=0
+    if alive || [ -n "$(procs)" ]; then
+        sweep
+        sweep_done=1
+    fi
+
+    if [ "$force" -eq 0 ] && watch_alive; then
+        waited=0
+        while :; do
+            left=$(cd "$ENGINE_DIR" && PYTHONPATH=. uv run --no-project python \
+                     -m engine.sf_watch --pending --since auto 2>/dev/null | tail -1)
+            case "$left" in ''|*[!0-9]*) left=0 ;; esac
+            busy=0
+            pgrep -f "stockfish" >/dev/null 2>&1 && busy=1
+            [ "$left" -eq 0 ] && [ "$busy" -eq 0 ] && break
+            printf "\rwaiting for Stockfish analysis... %d game(s) left  %dm%02ds" \
+                "$left" $((waited / 60)) $((waited % 60))
+            sleep 10
+            waited=$((waited + 10))
+        done
+        [ "$waited" -gt 0 ] && printf "\ranalysis complete after %dm%02ds%-30s\n" \
+            $((waited / 60)) $((waited % 60)) ""
+    fi
+    stop_watch
+
+    if [ "$sweep_done" -eq 1 ]; then
+        left="$(procs)"
+        if [ -z "$left" ]; then
+            echo "stopped, all children killed"
+        else
+            echo "WARNING: processes still alive: $left"
+            exit 1
+        fi
+        exit 0
+    fi
+
     if ! alive && [ -z "$(procs)" ]; then
         echo "not running"
         rm -f "$PIDFILE"
         exit 0
     fi
-    sweep
-    left="$(procs)"
-    if [ -z "$left" ]; then
-        echo "stopped, all children killed"
-    else
-        echo "WARNING: processes still alive: $left"
-        exit 1
-    fi
     ;;
 status)
+    if watch_alive; then
+        echo "analysis watcher: running ($(watch_procs | tr '\n' ' '))"
+    else
+        echo "analysis watcher: stopped"
+    fi
     if alive; then
         echo "running (pid $(cat "$PIDFILE"), $(procs | wc -l | tr -d ' ') processes)"
     elif [ -n "$(procs)" ]; then
@@ -83,7 +174,7 @@ log)
     tail -f "$LOG"
     ;;
 *)
-    echo "usage: bot up|down|status|log"
+    echo "usage: bot up | bot down [now] | bot status | bot log"
     exit 1
     ;;
 esac

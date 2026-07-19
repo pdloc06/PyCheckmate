@@ -85,7 +85,7 @@ class UciEngineClient:
     cwd : str, optional
         Working directory for the subprocess. Defaults to this repo's root;
         pointing it at another checkout runs *that* checkout's engine — which
-        is how `engine.abtest` pits two versions against each other.
+        is how `engine.sprt` pits two versions against each other.
 
     Raises
     ------
