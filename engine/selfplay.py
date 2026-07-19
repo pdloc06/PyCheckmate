@@ -24,6 +24,7 @@ Run it (CPython host spawning PyPy engines, when PyPy is available):
 Exits non-zero if any game ends in an illegal move or a crash, so it doubles as
 a pre-deploy assertion.
 """
+import random
 import sys
 import time
 
@@ -53,11 +54,62 @@ DEFAULT_GAMES = 20
 MOVETIME = 0.1   # seconds per move
 DEPTH = 12       # ply cap set above the budget's reach; the clock binds
 MAX_PLIES = 300
+BOOK_ATTEMPTS = 100  # redraws allowed before a random opening line is given up on
+
+
+def random_opening(plies: int, rng: random.Random) -> list[str]:
+    """
+    Build a random legal opening line, as UCI move strings.
+
+    Used to give a *pair* of games a shared starting position (see
+    `engine.abtest`). The line does not need to be balanced or sensible —
+    because the pair plays it from both sides, any advantage baked into it
+    is handed to each engine exactly once and cancels out. What it must be
+    is *legal* and *unfinished*, so both games start from a real position
+    with moves still available.
+
+    Parameters
+    ----------
+    plies : int
+        How many half-moves to play out.
+    rng : random.Random
+        Seeded generator, so a match's openings are reproducible.
+
+    Returns
+    -------
+    list of str
+        `plies` UCI move strings, ending in a position that still has legal
+        moves.
+
+    Notes
+    -----
+    Random play really does stumble into finished games — 8 random plies can
+    produce Fool's Mate (``1.b4 e6 2.f3 h5 3.g4 Qh4#``). A book line that ends
+    the game hands both halves of the pair a result neither engine played, so
+    such lines are discarded and redrawn rather than truncated. Truncating
+    would be worse than it looks: it leaves the position one move short of a
+    mate that both engines would simply play.
+    """
+    for _ in range(BOOK_ATTEMPTS):
+        gs = GameState()
+        line: list[str] = []
+        for _ in range(plies):
+            moves = gs.get_valid_moves()
+            if not moves:
+                break            # dead line; fall through to redraw
+            move = rng.choice(moves)
+            line.append(move.get_uci_notation())
+            gs.make_move(move, annotate=False)
+        if len(line) == plies and gs.get_valid_moves():
+            return line
+    raise RuntimeError(
+        f'could not draw a live {plies}-ply opening in {BOOK_ATTEMPTS} attempts')
 
 
 def play_game(white: UciEngineClient, black: UciEngineClient,
               depth: int = DEPTH, movetime: float = MOVETIME,
-              clock: tuple[float, float] | None = None) -> tuple[str, int, str | None]:
+              clock: tuple[float, float] | None = None,
+              opening: list[str] | None = None) -> tuple[str, int, str | None]:
     """
     Play one full game between two engine clients and referee every move.
 
@@ -84,12 +136,19 @@ def play_game(white: UciEngineClient, black: UciEngineClient,
         This is what makes time management measurable: an engine that banks
         unused budget gets deeper searches later in the same game, and an
         engine that overspends loses on time — exactly like on Lichess.
+    opening : list of str, optional
+        UCI moves to replay before either engine searches, so that two games
+        can share a starting position with the colours swapped. Book moves
+        cost no clock time, as on Lichess. They *do* count toward the played
+        move total, which is what the time budget uses to age its estimate of
+        the moves remaining.
 
     Returns
     -------
     tuple of (str, int, str or None)
         `(result, plies, failure)`. `result` is one of ``'checkmate'``,
-        ``'draw/stalemate'``, ``'move-cap'``, or (clock mode) ``'flagged'``.
+        ``'draw/stalemate'``, ``'move-cap'``, ``'bad-opening'``, or (clock
+        mode) ``'flagged'``.
         For both ``'checkmate'`` and ``'flagged'`` the losing side is the
         side to move after `plies` half-moves — even plies means White.
         `failure` is None on a clean game, or a human-readable string
@@ -103,6 +162,18 @@ def play_game(white: UciEngineClient, black: UciEngineClient,
     played: list[str] = []
     # Simulated clocks, only meaningful in clock mode
     remaining = [clock[0], clock[0]] if clock else [0.0, 0.0]
+
+    # Replay the shared opening, if this game is half of a colour-reversed
+    # pair. These plies are pushed through the same referee path as searched
+    # moves, so an illegal book line fails here rather than silently
+    # desynchronising the engines from the driver's board.
+    for uci_move in opening or ():
+        book_legal = {m.get_uci_notation(): m for m in gs.get_valid_moves()}
+        if uci_move not in book_legal:
+            return ('bad-opening', len(played),
+                    f'opening move {uci_move!r} is not legal after {played}')
+        gs.make_move(book_legal[uci_move], annotate=False)
+        played.append(uci_move)
 
     while True:
         moves = gs.get_valid_moves()  # UI path: sets gs.in_check and folds

@@ -16,9 +16,16 @@ How the measurement works:
   pure stdlib, so a bare checkout needs no venv. The referee (`selfplay.play_game`)
   holds the authoritative `GameState` and rejects illegal moves, so a buggy
   "improvement" fails loudly instead of winning by confusion.
-- **Colors alternate** every game. White moves first and wins more often at
-  every level of chess; without alternation a lopsided color draw would
-  masquerade as a strength difference.
+- **Games are played in colour-reversed pairs.** Alternating colours alone is
+  not enough: if the two games of a pair start from *different* positions,
+  every opening's built-in advantage lands on a random engine and shows up as
+  noise. So each pair generates one random opening line and plays it **twice,
+  with the colours swapped** (`OPENING_PLIES`; the standard trick, cutechess
+  calls it ``-repeat``). Any edge baked into the line is then handed to each
+  engine exactly once and cancels, which is why the book does not need to be
+  balanced — only legal and varied. This costs nothing and is the cheapest
+  variance reduction available; without it a match needs substantially more
+  games for the same resolution.
 - **Score → Elo.** A match score ``s`` (wins + half the draws, as a fraction)
   maps to an Elo difference via the logistic model ``elo = -400·log10(1/s − 1)``:
   55% ≈ +35 Elo, 60% ≈ +70. The mapping is steep near 50%, which is exactly
@@ -52,13 +59,20 @@ clock-handling improvement is invisible by construction. Flagged games count
 as losses for the side that ran out, exactly like online.
 """
 import math
+import random
 import sys
 
-from engine.selfplay import DEPTH, play_game
+from engine.selfplay import DEPTH, play_game, random_opening
 from engine.uci_client import PROJECT_ROOT, UciEngineClient, resolve_engine_command
 
 DEFAULT_GAMES = 100
 DEFAULT_MOVETIME = 0.2  # seconds per move: fast enough for 100 games in ~an hour
+
+# Half-moves of random book before each *pair* of games. Long enough that the
+# two games of a pair are a real test of different positions, short enough that
+# a random line is rarely already decided.
+OPENING_PLIES = 8
+OPENING_SEED = 20240719  # reproducible books, so a match can be repeated exactly
 
 
 def elo_from_score(score: float) -> float:
@@ -132,16 +146,24 @@ def main() -> None:
     dir_a, dir_b = specs
     print(f'A: {dir_a}\nB: {dir_b}')
     timing = (f'clock {clock[0]:g}s+{clock[1]:g}s' if clock else f'{movetime}s/move')
-    print(f'{games} games at {timing} (depth cap {DEPTH}), colors alternate\n')
+    print(f'{games} games at {timing} (depth cap {DEPTH}), '
+          f'{OPENING_PLIES}-ply books played twice with colors reversed\n')
 
     engine_a, engine_b = spawn(dir_a), spawn(dir_b)
+    book_rng = random.Random(OPENING_SEED)
+    opening: list[str] = []
     points_a = 0.0
     wins_a = wins_b = draws = 0
     try:
         for game in range(1, games + 1):
             a_is_white = game % 2 == 1
+            # Odd games open a new pair and draw the book line; even games
+            # replay that same line with the colours swapped.
+            if a_is_white:
+                opening = random_opening(OPENING_PLIES, book_rng)
             white, black = (engine_a, engine_b) if a_is_white else (engine_b, engine_a)
-            result, plies, failure = play_game(white, black, movetime=movetime, clock=clock)
+            result, plies, failure = play_game(white, black, movetime=movetime,
+                                               clock=clock, opening=opening)
             if failure is not None:
                 sys.exit(f'game {game}: {failure}')
 
