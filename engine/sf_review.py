@@ -28,6 +28,7 @@ with the live engine for CPU and degrade the very games being collected.
 """
 import argparse
 import datetime
+import math
 import glob
 import os
 import re
@@ -70,6 +71,12 @@ MAX_CPL = 1_000
 INACCURACY = 50
 MISTAKE = 100
 BLUNDER = 300
+
+# Lichess's win%/accuracy curves, so our numbers line up with the site's.
+WIN_PERCENT_SLOPE = 0.00368208
+ACCURACY_SCALE = 103.1668
+ACCURACY_DECAY = 0.04354
+ACCURACY_OFFSET = 3.1669
 
 
 def find_stockfish() -> str:
@@ -126,6 +133,62 @@ def white_pov(score: int, is_mate: bool, white_to_move: bool) -> int:
         value = score
     signed = value if white_to_move else -value
     return min(max(signed, -EVAL_CLAMP), EVAL_CLAMP)
+
+
+def win_percent(centipawns: int) -> float:
+    """
+    Convert a centipawn evaluation into an expected-score percentage.
+
+    Centipawns are not linear in *practical* value: the difference between
+    +100 and +200 changes a game's outcome far more than the difference
+    between +900 and +1000. Lichess maps them through a logistic curve before
+    grading, and matching that mapping is what makes our numbers comparable
+    with the site's.
+
+    Parameters
+    ----------
+    centipawns : int
+        Evaluation from one side's point of view.
+
+    Returns
+    -------
+    float
+        Expected score for that side, 0-100.
+    """
+    return 50 + 50 * (2 / (1 + math.exp(-WIN_PERCENT_SLOPE * centipawns)) - 1)
+
+
+def move_accuracy(before: float, after: float) -> float:
+    """
+    Grade one move on Lichess's 0-100 accuracy scale.
+
+    Accuracy is a function of how much *winning chance* a move gave away,
+    not how many centipawns — so a blunder in an already-lost position costs
+    little, which matches how players actually judge moves.
+
+    Parameters
+    ----------
+    before : float
+        Win percentage for the mover before the move.
+    after : float
+        Win percentage for the mover after it.
+
+    Returns
+    -------
+    float
+        Accuracy for this move, clamped to 0-100.
+
+    Notes
+    -----
+    Lichess additionally weights each move by the local "volatility" of the
+    position and blends a harmonic mean into the game total. This is the
+    per-move curve only, so a game average computed from it runs slightly
+    higher than the site's for sharp games. Good enough to compare our own
+    games against each other, which is what it is for.
+    """
+    loss = max(0.0, before - after)
+    raw = ACCURACY_SCALE * math.exp(-ACCURACY_DECAY * loss) - ACCURACY_OFFSET
+    return min(100.0, max(0.0, raw))
 
 
 def analyse_game(path: str, engine: UciEngineClient, depth: int
