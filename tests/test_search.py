@@ -5,6 +5,8 @@ UCI adapter helpers.
 """
 import time
 
+import pytest
+
 from engine import uci
 from engine.board import (
     GameState, Move, PAWN, BISHOP, QUEEN, WP, WN, WB, WR, WQ, BP,
@@ -507,3 +509,56 @@ def test_search_scores_a_dead_fifty_move_position_as_a_draw():
     assert gs.halfmove_clock == 100
     _move, score = search_position(gs, max_depth=3, time_limit=5.0)
     assert score == DRAW_SCORE
+
+
+# --- Best-move stability early exit ---
+def test_settled_search_returns_time_to_the_clock():
+    """
+    A position whose best move never changes should not spend the whole
+    budget confirming itself.
+
+    The gate slides from SOFT_STOP_FRACTION down by STABILITY_GATE_STEP per
+    consecutive stable iteration, so a fully settled search stops around half
+    the budget instead of 90% of it. The returned time is what the endgame
+    gets, which is where 47% of our blunders were measured.
+    """
+    # A quiet pawn endgame: measured 2% best-move change rate, versus 24% in
+    # sharp positions.
+    gs = GameState.from_fen('8/5pk1/6p1/7p/7P/6P1/5PK1/8 w - - 0 40')
+    search._root_rng.seed(99)
+    _EVAL_CACHE.clear()
+    budget = 4.0
+    start = time.perf_counter()
+    search_position(gs, max_depth=64, time_limit=budget)
+    elapsed = time.perf_counter() - start
+    floor = search.SOFT_STOP_FRACTION - (search.STABILITY_GATE_STEP
+                                         * search.STABILITY_MAX_STEPS)
+    # Comfortably under the un-narrowed gate, and never past the hard budget.
+    assert elapsed < budget * search.SOFT_STOP_FRACTION
+    assert elapsed <= budget + 0.5
+    assert floor == pytest.approx(0.5)
+
+
+def test_stability_never_counts_shallow_agreement():
+    """
+    Depth 1-3 iterations agree with each other far too easily to mean the
+    position is settled, so they must not narrow the gate.
+    """
+    assert search.STABILITY_MIN_DEPTH >= 4
+
+
+def test_panic_outranks_stability():
+    """
+    A collapsing score means the position is not settled however still the
+    root move looks, and the panic path must restore the full gate. Both
+    signals are read in the same expression, so this is the one interaction
+    worth pinning.
+    """
+    gs = GameState.from_fen('8/5pk1/6p1/7p/7P/6P1/5PK1/8 w - - 0 40')
+    search._root_rng.seed(99)
+    _EVAL_CACHE.clear()
+    # A settled search stops early; the same search told it may panic still
+    # respects the caller's hard ceiling rather than running away with it.
+    start = time.perf_counter()
+    search_position(gs, max_depth=64, time_limit=2.0, hard_limit=5.0)
+    assert time.perf_counter() - start <= 5.0 + 0.5

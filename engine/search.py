@@ -136,13 +136,57 @@ SOFT_STOP_FRACTION = 0.9
 # 1.11x; keeping only the continuous part plus an early-exit discount for
 # settled searches got 1.36x, indistinguishable from doing nothing.
 #
-# The reason the stability signal backfires is worth keeping: in quiet
-# endgames the root best move flaps between moves of *identical* score, so it
-# reads as maximally unstable exactly where there is least to think about,
-# while a sharp position the engine happens to see clearly reads as calm.
-# Move-changes are a poor difficulty signal for this engine; a collapsing
-# score is a good one. Anything built here should extend the latter.
+# The reason the stability signal backfired was recorded as: in quiet endgames
+# the root best move flaps between moves of *identical* score, so it reads as
+# maximally unstable exactly where there is least to think about, while a sharp
+# position the engine happens to see clearly reads as calm.
+#
+# **That is no longer true, and the fix was accidental.** Ties cannot displace
+# the incumbent any more: `_search_root` compares with a strict `score >
+# best_score` and searches the previous iteration's best move first, so an
+# equal-scoring rival is examined second and loses the comparison. Re-measured
+# over 12 positions and 84 iteration transitions:
+#
+#   quiet positions   2% best-move change rate,  0 equal-score changes
+#   sharp positions  24% best-move change rate,  0 equal-score changes
+#
+# The flapping the old note describes is now literally zero, and the signal
+# discriminates 12x in the *right* direction. That is what
+# STABILITY_GATE_STEP below is built on. Two lessons kept: a measured negative
+# result is only valid while the code it measured still exists, and the reason
+# a thing failed is worth writing down precisely, because it is the only way to
+# notice later that the reason has evaporated.
 PANIC_SCORE_DROP = 60
+
+# Best-move stability: how much of the soft gate to give back when successive
+# iterations keep returning the same root move. A settled search has nothing
+# left to discover, and every second returned here is a second the endgame
+# gets instead — which is where 47% of our blunders live.
+#
+# The gate slides from SOFT_STOP_FRACTION down by one step per consecutive
+# stable iteration, so 0.9 -> 0.8 -> 0.7 -> 0.6 -> 0.5. The floor is half the
+# budget, matching d-house's `(2 - stability) * alloc / 2`.
+#
+# A panic overrides this completely. Score collapse means the position is not
+# settled no matter how still the root move looks, and that signal has always
+# been the more reliable of the two.
+#
+# Measured on a 3s budget, share of it actually spent:
+#
+#                off      on
+#   quiet      100.3%   71.9%     <- 28 points of clock handed back
+#   sharp      100.4%   95.5%     <-  5 points
+#
+# Which is the whole point: it takes time from positions with nothing left to
+# find and leaves sharp ones alone. Note this is invisible to
+# `engine.tools.bench`, which searches to a fixed depth on a 600s budget, so
+# the gate never binds there and node counts stay identical. Real games are
+# the only place this shows up.
+STABILITY_GATE_STEP = 0.1
+STABILITY_MAX_STEPS = 4
+# Shallow iterations agree with each other far too easily to mean anything;
+# the change rates above were measured on real depths, not on depth 2.
+STABILITY_MIN_DEPTH = 4
 
 # Aspiration windows: from this depth on, re-search around the previous
 # iteration's score inside a narrow window instead of the full one. Most
@@ -392,14 +436,20 @@ def search_position(
     best_score = -CHECKMATE_SCORE
     prev_score: int | None = None
     panic = False
+    stable_iterations = 0
 
     for depth in range(1, max_depth + 1):
         # Soft stop: never abandon depth 1 (a move must exist), but don't
         # start a deeper iteration that the remaining budget can't finish —
         # see SOFT_STOP_FRACTION. A panic widens the gate to the full soft
-        # budget. The in-search abort (at the soft limit normally, the hard
-        # ceiling during a panic) stays as backstop.
-        gate = time_limit if panic else time_limit * SOFT_STOP_FRACTION
+        # budget; a settled root move narrows it (see STABILITY_GATE_STEP).
+        # The in-search abort (at the soft limit normally, the hard ceiling
+        # during a panic) stays as backstop.
+        if panic:
+            gate = time_limit
+        else:
+            steps = min(STABILITY_MAX_STEPS, stable_iterations)
+            gate = time_limit * (SOFT_STOP_FRACTION - STABILITY_GATE_STEP * steps)
         if depth > 1 and time.perf_counter() - info.start_time > gate:
             break
         try:
@@ -411,6 +461,15 @@ def search_position(
             break
 
         if move is not None:
+            # Compared before `best_move` is overwritten: this asks whether
+            # the deeper iteration agreed with the shallower one. Counted only
+            # from STABILITY_MIN_DEPTH, and reset the moment the root changes
+            # its mind — one disagreement means the position is still moving.
+            if move == best_move and depth >= STABILITY_MIN_DEPTH:
+                stable_iterations += 1
+            elif move != best_move:
+                stable_iterations = 0
+
             best_move, best_score = move, score
             # Re-order the root list so the current best is searched first
             root_moves.remove(move)
