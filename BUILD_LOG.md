@@ -567,6 +567,55 @@ that stage-1 subtrees have already updated. Fresher information, 0.5% fewer
 nodes, and a reminder that lazy scoring is not automatically behavior-neutral
 even when lazy *ordering* is.
 
+### Texel tuning: the tool works, the dataset does not (2026-07-22)
+
+Mistake M7 is that ~34 evaluation constants were hand-picked and never fitted,
+and §7.5 put Texel tuning at 50-100 Elo — the highest-value strength item never
+attempted. `engine/tools/tune.py` now implements it: replay the bot's PGNs into
+positions labeled by game result, fit the sigmoid constant K, then coordinate
+descent on the weights against mean squared error.
+
+Two safeguards were built in from the start rather than added after a bad
+result, and they are the reason this entry exists:
+
+- **Split by game, not by position.** Positions within one game share pawn
+  structure, material and result, so a position-level split leaks the answer
+  across it.
+- **Keep only what improves error on games the fit never saw.** Training error
+  always falls; that is what fitting means.
+
+**Run to convergence, it overfits outright.** Training error fell 33% (0.0871
+-> 0.0587) while held-out error bottomed at round 3 and then climbed to 0.1401
+— worse than not tuning at all. The converged weights were chess nonsense:
+bishop below knight, knight outposts penalized, isolated pawns rewarded, every
+passed-pawn bonus negative.
+
+**Early stopping rescued a plausible-looking 5.9% held-out improvement — and
+that turned out to be noise too.** Repeating the entire fit across four
+different game splits:
+
+| split | start valid | best valid | change |
+| --- | --- | --- | --- |
+| 1 | 0.0938 | 0.0909 | -3.1% |
+| 2 | 0.1089 | 0.1022 | -6.2% |
+| 3 | 0.1285 | 0.1285 | **+0.0%** |
+| 4 | 0.0661 | 0.0543 | **-17.8%** |
+
+The answer ranges from nothing to 18% depending only on which 32 games are held
+out, and the *starting* error varies 2x across the same splits. The 5.9% was one
+draw from that distribution.
+
+The cause is volume: 127 usable games give **3,231 quiet positions**, about 111
+per parameter, where the method wants thousands. **The tuned values were not
+applied.**
+
+This is the ±70-Elo-instrument mistake in a new costume — a number that looks
+like a result because it came out of an optimizer, on a sample too small to
+carry it. The difference this time is that the check was built before the
+number existed, so it cost one afternoon instead of a night of matches. The
+tool is kept and re-runs cheaply; the gate for believing it is that the
+split-to-split spread above collapses.
+
 ---
 
 ## Performance Benchmarks
