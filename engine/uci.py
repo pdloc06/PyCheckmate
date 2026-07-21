@@ -44,8 +44,33 @@ DEFAULT_MOVETIME = 5.0  # seconds
 # opening book answers for us). So the curve is aimed to peak across that
 # band: EXPECTED_GAME_MOVES is set past a typical game so the estimate stays
 # generous through it, and MIN_MOVES_TO_GO keeps the divisor sane afterwards.
+#
+# That aim was half right. 101 rated games later, moves 16-30 are still the
+# worst band (ACPL 29.5) — the extra time did not fix them — while moves 46+
+# turned out to hold 47% of all our blunders on 8-12% of the clock. So the
+# floor below was re-derived from those games rather than guessed again.
+#
+# The floor is what governs every move from 34 onward (past that,
+# EXPECTED_GAME_MOVES - moves_played has already fallen through it), so it is
+# really an answer to "given the game has lasted this long, how many of our
+# moves are still to come?". Measured across the 101 games, that answer is
+# strikingly *flat* — median 21-28 and mean 24-33 whether you ask at move 34,
+# 46, 65 or 95. A single constant is therefore the right shape; 18 was simply
+# too small a value for it, by 40-55%.
+#
+# Raising it looks like it should make the endgame *poorer* — a bigger divisor
+# is a smaller slice. It does the opposite, because the clock decays
+# geometrically: spending 1/28 instead of 1/18 leaves 34% of the clock alive
+# after 30 moves where the old floor left 18%, and the larger surviving clock
+# more than repays the thinner slice. Simulated over a 90-move 5+0 game, move
+# 70 goes 0.58s -> 1.12s and move 90 goes 0.15s -> 0.52s. Moves 1-30 are
+# untouched (the floor does not bind yet); the time comes out of moves 31-45,
+# the second-cheapest band we grade.
+#
+# 28 also lands just under LOW_CLOCK_MOVES_TO_GO (30) below, which turns the
+# old 18 -> 30 cliff at the low-clock tier into a nearly seamless step.
 EXPECTED_GAME_MOVES = 52  # our own moves; real games ran 26-67, averaging 45
-MIN_MOVES_TO_GO = 18      # floor on the estimate once the game runs long
+MIN_MOVES_TO_GO = 28      # floor on the estimate once the game runs long
 
 # Two emergency tiers. Spending harder mid-game necessarily drains the clock
 # faster, which without a brake would flag a marathon game; these restore
