@@ -17,8 +17,9 @@ import random
 import pytest
 
 import engine.move_finder as move_finder
-from engine.chess_engine import GameState, Move
+from engine.board import GameState, Move
 from engine.move_finder import MOPUP_MIN_ADVANTAGE, evaluate, find_best_move
+from engine.movegen import generate_legal
 
 
 def _board(pieces: dict[str, str]) -> list[list[str]]:
@@ -140,7 +141,7 @@ def _play_out(gs: GameState, move_limit: int, depth: int = 4) -> tuple[bool, int
     # unseeded single run would pass or fail more or less at random.
     move_finder._root_rng = random.Random(20240719)
     for ply in range(move_limit):
-        moves = gs.get_valid_moves()
+        moves = generate_legal(gs)
         if not moves:
             return gs.is_checkmate, ply
         # Depth-bounded, not clock-bounded: a time limit would make the test

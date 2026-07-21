@@ -7,9 +7,10 @@ import time
 
 from engine import move_finder
 from engine import uci
-from engine.chess_engine import (
+from engine.board import (
     GameState, Move, PAWN, BISHOP, QUEEN, WP, WN, WB, WR, WQ, BP,
 )
+from engine.movegen import generate_legal
 
 
 # --- Search finds forced wins ---
@@ -112,7 +113,7 @@ def _see_of(fen, uci):
     """Helper: the SEE value of the move written in UCI from the given FEN."""
     gs = GameState.from_fen(fen)
     move = next(
-        m for m in gs.get_valid_moves(for_ai=True)
+        m for m in generate_legal(gs, for_ai=True)
         if Move.from_ai_tuple(m, gs.board).get_uci_notation() == uci
     )
     return move_finder._see(gs, move)
@@ -359,7 +360,7 @@ def test_persistent_tt_reused_across_searches(gs):
     size_after_first = len(tt)
     gs.make_ai_move(first)
     second = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
-    assert second in gs.get_valid_moves(for_ai=True)
+    assert second in generate_legal(gs, for_ai=True)
     assert len(tt) >= size_after_first
 
 

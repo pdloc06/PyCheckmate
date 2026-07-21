@@ -9,14 +9,15 @@ human-readable "Nf3"/"exd5" format), possibly decorated with move numbers,
 This module strips all the decoration down to the mainline SAN tokens and
 resolves each token against the engine's own legal-move generator: instead of
 re-implementing chess rules, a SAN string is simply matched against the Move
-objects `GameState.get_valid_moves()` already produces. That guarantees any
+objects `generate_legal(GameState)` already produces. That guarantees any
 move we accept is legal, and any ambiguity in the PGN is detected for free.
 
 Like the rest of `engine/`, this module is pure stdlib.
 """
 import re
 
-from engine.chess_engine import GameState, INT_TO_CODE, Move
+from engine.board import GameState, INT_TO_CODE, Move
+from engine.movegen import generate_legal
 
 # One `[Tag "Value"]` header pair, e.g. [Event "Casual game"]
 _TAG_RE = re.compile(r'^\s*\[(\w+)\s+"(.*)"\]\s*$')
@@ -140,7 +141,7 @@ def san_to_move(gs: GameState, san: str, valid_moves: list[Move] | None = None) 
         If the token is unreadable, matches no legal move, or is ambiguous.
     """
     if valid_moves is None:
-        valid_moves = gs.get_valid_moves()
+        valid_moves = generate_legal(gs)
 
     # Trailing check/mate marks and annotation glyphs carry no move identity
     token = san.strip()
@@ -216,12 +217,12 @@ def game_from_pgn(text: str) -> GameState:
         raise PgnError('No moves found in PGN')
 
     for token in tokens:
-        move = san_to_move(gs, token, gs.get_valid_moves())
+        move = san_to_move(gs, token, generate_legal(gs))
         gs.make_move(move)
 
     # Refresh terminal flags and stamp '#' on a mating final move, mirroring
     # what the game loop does after each move
-    gs.get_valid_moves()
+    generate_legal(gs)
     if gs.is_checkmate and gs.move_log:
         gs.move_log[-1].is_checkmate = True
         gs.move_log[-1].is_check = False

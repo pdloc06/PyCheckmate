@@ -3,7 +3,7 @@ Shared configuration and fixtures for pytest.
 Pytest automatically discovers this file; no need to import these fixtures manually.
 """
 import pytest
-from engine.chess_engine import CODE_TO_INT, GameState
+from engine.board import CODE_TO_INT, GameState
 
 
 @pytest.fixture

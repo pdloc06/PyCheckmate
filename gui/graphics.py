@@ -12,7 +12,7 @@ player-bar offset are handled in exactly one place.
 from pathlib import Path
 import pygame as pg
 import config
-from engine import chess_engine
+from engine.board import BP, EMPTY, GameState, INT_TO_CODE, Move
 
 # Asset directories, resolved absolutely from this file rather than from the
 # working directory, so the game loads its art no matter where it is launched
@@ -209,8 +209,8 @@ def cache_coordinate_fonts(coord_font: pg.font.Font) -> None:
 
 def draw_game_state(
     screen: pg.Surface,
-    gs: chess_engine.GameState,
-    valid_moves: list[chess_engine.Move],
+    gs: GameState,
+    valid_moves: list[Move],
     sq_selected: tuple[int, int] | None,
     board_flipped: bool,
     coord_font: pg.font.Font
@@ -222,9 +222,9 @@ def draw_game_state(
     ----------
     screen : pygame.Surface
         The main display surface to draw on.
-    gs : chess_engine.GameState
+    gs : GameState
         The current state of the game containing board information.
-    valid_moves : list of chess_engine.Move
+    valid_moves : list of Move
         The list of currently valid moves for highlighting.
     sq_selected : tuple of int or None
         The currently selected square coordinates as (row, col), or None if
@@ -310,15 +310,15 @@ def draw_pieces(screen: pg.Surface, board: list[list[int]], board_flipped: bool)
     for row in range(config.DIMENSION):
         for col in range(config.DIMENSION):
             piece = board[row][col]
-            if piece != chess_engine.EMPTY:
+            if piece != EMPTY:
                 x, y = board_to_screen(row, col, board_flipped)
                 # config.IMAGES is still keyed by the two-char code ('wP'), so
                 # convert the board int at this render boundary.
-                image = config.IMAGES[chess_engine.INT_TO_CODE[piece]]
+                image = config.IMAGES[INT_TO_CODE[piece]]
                 screen.blit(image, pg.Rect(x, y, config.SQ_SIZE, config.SQ_SIZE))
 
 def highlight_current_square(
-    screen: pg.Surface, gs: chess_engine.GameState, valid_moves: list[chess_engine.Move],
+    screen: pg.Surface, gs: GameState, valid_moves: list[Move],
     sq_selected: tuple[int, int] | None, board_flipped: bool
 ) -> None:
     """
@@ -328,9 +328,9 @@ def highlight_current_square(
     ----------
     screen : pygame.Surface
         The main display surface to draw on.
-    gs : chess_engine.GameState
+    gs : GameState
         The current state of the game containing board information.
-    valid_moves : list of chess_engine.Move
+    valid_moves : list of Move
         The list of currently valid moves for highlighting.
     sq_selected : tuple of int or None
         The currently selected square coordinates as (row, col).
@@ -344,7 +344,7 @@ def highlight_current_square(
     if sq_selected is not None:
         row, col = sq_selected
         piece = gs.board[row][col]
-        if piece != chess_engine.EMPTY and (piece < chess_engine.BP) == gs.white_to_move:
+        if piece != EMPTY and (piece < BP) == gs.white_to_move:
             current_sq = pg.Surface((config.SQ_SIZE, config.SQ_SIZE))
             current_sq.set_alpha(75)
             current_sq.fill(pg.Color('yellow'))
@@ -364,7 +364,7 @@ def highlight_current_square(
                     screen.blit(movable_indicator, board_to_screen(move.end_row, move.end_col, board_flipped))
 
 
-def highlight_last_move(screen: pg.Surface, gs: chess_engine.GameState, board_flipped: bool) -> None:
+def highlight_last_move(screen: pg.Surface, gs: GameState, board_flipped: bool) -> None:
     """
     Highlight the starting and ending squares of the last executed move.
 
@@ -372,7 +372,7 @@ def highlight_last_move(screen: pg.Surface, gs: chess_engine.GameState, board_fl
     ----------
     screen : pygame.Surface
         The main display surface to draw on.
-    gs : chess_engine.GameState
+    gs : GameState
         The current state of the game containing the move log history.
     board_flipped : bool
         Flag indicating whether the board perspective is currently flipped.

@@ -2,7 +2,8 @@
 Test suite covering internal engine mechanics: Piece tracking synchronization,
 Ambiguous Notation (PGN) resolution, and AI performance flags.
 """
-from engine.chess_engine import GameState, Move, EMPTY, WN, WQ, BK, BP
+from engine.board import GameState, Move, EMPTY, WN, WQ, BK, BP
+from engine.movegen import generate_legal
 
 
 # --- Helpers specific to internal mechanics ---
@@ -113,7 +114,7 @@ def test_ambiguous_notation_different_file(empty_kings_gs):
     gs.board[7][6] = WN;
     gs.white_pieces.add((7, 6))
 
-    valid_moves = gs.get_valid_moves(for_ai=False)
+    valid_moves = generate_legal(gs, for_ai=False)
     move_d2 = find_move(valid_moves, 6, 3, 5, 5)
     move_g1 = find_move(valid_moves, 7, 6, 5, 5)
 
@@ -129,7 +130,7 @@ def test_ambiguous_notation_same_file(empty_kings_gs):
     gs.board[3][5] = WN;
     gs.white_pieces.add((3, 5))
 
-    valid_moves = gs.get_valid_moves(for_ai=False)
+    valid_moves = generate_legal(gs, for_ai=False)
     move_f1 = find_move(valid_moves, 7, 5, 5, 4)
     move_f5 = find_move(valid_moves, 3, 5, 5, 4)
 
@@ -147,7 +148,7 @@ def test_ambiguous_notation_file_and_rank_overlap(empty_kings_gs):
     gs.board[6][0] = WQ;
     gs.white_pieces.add((6, 0))
 
-    valid_moves = gs.get_valid_moves(for_ai=False)
+    valid_moves = generate_legal(gs, for_ai=False)
     move_d2 = find_move(valid_moves, 6, 3, 3, 3)
     move_d8 = find_move(valid_moves, 0, 3, 3, 3)
     move_a2 = find_move(valid_moves, 6, 0, 3, 3)
@@ -176,7 +177,7 @@ def test_ambiguous_notation_with_capture_and_check(empty_kings_gs):
     gs.board[5][5] = BP
     gs.black_pieces.add((5, 5))
 
-    valid_moves = gs.get_valid_moves(for_ai=False)
+    valid_moves = generate_legal(gs, for_ai=False)
     move_d2 = find_move(valid_moves, 6, 3, 5, 5)
 
     # Execute the move so the engine calculates the check state (annotate=True)
@@ -193,6 +194,6 @@ def test_for_ai_flag_bypasses_notation(empty_kings_gs):
     gs.board[7][6] = WN;
     gs.white_pieces.add((7, 6))
 
-    valid_moves = gs.get_valid_moves(for_ai=True)
+    valid_moves = generate_legal(gs, for_ai=True)
     move_d2 = find_move(valid_moves, 6, 3, 5, 5)
     assert getattr(move_d2, 'disambiguation', '') == ''

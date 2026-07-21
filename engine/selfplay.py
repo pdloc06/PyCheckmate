@@ -28,13 +28,14 @@ import random
 import sys
 import time
 
-from engine.chess_engine import GameState, Move
+from engine.board import GameState, Move
 from engine.uci import clock_move_budget
 from engine.uci_client import (
     EngineClientError,
     UciEngineClient,
     resolve_engine_command,
 )
+from engine.movegen import generate_legal
 
 # How many games a full run plays, and the per-move search budget. MAX_PLIES
 # bounds a single game: draw detection already ends games (50-move / threefold
@@ -94,13 +95,13 @@ def random_opening(plies: int, rng: random.Random) -> list[str]:
         gs = GameState()
         line: list[str] = []
         for _ in range(plies):
-            moves = gs.get_valid_moves()
+            moves = generate_legal(gs)
             if not moves:
                 break            # dead line; fall through to redraw
             move = rng.choice(moves)
             line.append(move.get_uci_notation())
             gs.make_move(move, annotate=False)
-        if len(line) == plies and gs.get_valid_moves():
+        if len(line) == plies and generate_legal(gs):
             return line
     raise RuntimeError(
         f'could not draw a live {plies}-ply opening in {BOOK_ATTEMPTS} attempts')
@@ -168,7 +169,7 @@ def play_game(white: UciEngineClient, black: UciEngineClient,
     # moves, so an illegal book line fails here rather than silently
     # desynchronising the engines from the driver's board.
     for uci_move in opening or ():
-        book_legal = {m.get_uci_notation(): m for m in gs.get_valid_moves()}
+        book_legal = {m.get_uci_notation(): m for m in generate_legal(gs)}
         if uci_move not in book_legal:
             return ('bad-opening', len(played),
                     f'opening move {uci_move!r} is not legal after {played}')
@@ -176,7 +177,7 @@ def play_game(white: UciEngineClient, black: UciEngineClient,
         played.append(uci_move)
 
     while True:
-        moves = gs.get_valid_moves()  # UI path: sets gs.in_check and folds
+        moves = generate_legal(gs)  # UI path: sets gs.in_check and folds
         if not moves:                 #   50-move / threefold into an empty list
             return ('checkmate' if gs.in_check else 'draw/stalemate', len(played), None)
         if len(played) >= MAX_PLIES:

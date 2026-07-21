@@ -7,7 +7,7 @@ control buttons, the pawn promotion menu, and endgame badges.
 """
 import pygame as pg
 import config
-from engine import chess_engine
+from engine.board import BP, EMPTY, GameState, INT_TO_CODE, Move
 from gui import graphics
 
 # Layout constants shared by draw_move_log and get_move_log_click_index so the
@@ -113,10 +113,10 @@ def compute_captured_material(board: list[list[int]]) -> tuple[dict[str, list[st
     on_board = {'w': dict.fromkeys(STARTING_PIECE_COUNTS, 0), 'b': dict.fromkeys(STARTING_PIECE_COUNTS, 0)}
     for row in board:
         for piece in row:
-            if piece == chess_engine.EMPTY:
+            if piece == EMPTY:
                 continue
             # config-facing counts are keyed by the two-char code letters
-            code = chess_engine.INT_TO_CODE[piece]
+            code = INT_TO_CODE[piece]
             color, kind = code[0], code[1]
             if kind in on_board[color]:
                 on_board[color][kind] += 1
@@ -387,7 +387,7 @@ def draw_main_menu(
 
 def draw_player_bars(
     screen: pg.Surface,
-    gs: chess_engine.GameState,
+    gs: GameState,
     font: pg.font.Font,
     board_flipped: bool,
     vs_ai: bool,
@@ -408,7 +408,7 @@ def draw_player_bars(
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : GameState
         The current game state (used for the turn indicator and material).
     font : pygame.font.Font
         Font for player names, the material badge, and clock text.
@@ -516,7 +516,7 @@ def time_forfeit_banner(screen: pg.Surface, flag_fallen_color: str) -> None:
 
 def draw_move_log(
     screen: pg.Surface,
-    gs: chess_engine.GameState,
+    gs: GameState,
     font: pg.font.Font,
     forced_result: str | None = None,
     show_review: bool = False,
@@ -528,7 +528,7 @@ def draw_move_log(
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : GameState
         The current game state instance containing the move history.
     font : pygame.font.Font
         The font object utilized for rendering the log text.
@@ -684,7 +684,7 @@ def get_move_log_click_index(
 
 
 def get_promotion_menu_rects(
-    move: chess_engine.Move,
+    move: Move,
     board_flipped: bool
 ) -> tuple[pg.Rect, pg.Rect, list[tuple[pg.Rect, str]]]:
     """
@@ -692,7 +692,7 @@ def get_promotion_menu_rects(
 
     Parameters
     ----------
-    move : chess_engine.Move
+    move : Move
         The pawn promotion move object containing coordinates.
     board_flipped : bool
         Flag indicating whether the board perspective is currently flipped.
@@ -750,7 +750,7 @@ def get_promotion_menu_rects(
 
 def draw_promotion_menu(
     screen: pg.Surface,
-    move: chess_engine.Move,
+    move: Move,
     board_flipped: bool,
     font: pg.font.Font
 ) -> None:
@@ -761,7 +761,7 @@ def draw_promotion_menu(
     ----------
     screen : pygame.Surface
         The main display surface to draw on.
-    move : chess_engine.Move
+    move : Move
         The move that triggered the pawn promotion.
     board_flipped : bool
         Flag indicating whether the board perspective is currently flipped.
@@ -772,7 +772,7 @@ def draw_promotion_menu(
     -------
     None
     """
-    color = 'w' if move.piece_moved < chess_engine.BP else 'b'
+    color = 'w' if move.piece_moved < BP else 'b'
     menu_bg_rect, shadow_rect, menu_rects = get_promotion_menu_rects(move, board_flipped)
 
     # Draw Drop Shadow (Fake blur using semi-transparent black surface)
@@ -811,7 +811,7 @@ def draw_promotion_menu(
 
 def winning_animation(
     screen: pg.Surface,
-    gs: chess_engine.GameState,
+    gs: GameState,
     white_wins: bool,
     board_flipped: bool
 ) -> None:
@@ -822,7 +822,7 @@ def winning_animation(
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : GameState
         The game state containing king location parameters.
     white_wins : bool
         Flag signifying whether white executes the winning attack.
@@ -848,7 +848,7 @@ def winning_animation(
     draw_badge(screen, "Winner", pg.Color('white'), pg.Color('green'), win_x + config.SQ_SIZE, win_y)
     draw_badge(screen, "Checkmate", pg.Color('red'), pg.Color('white'), lose_x + config.SQ_SIZE, lose_y)
 
-def stalemate_animation(screen: pg.Surface, gs: chess_engine.GameState, board_flipped: bool) -> None:
+def stalemate_animation(screen: pg.Surface, gs: GameState, board_flipped: bool) -> None:
     """
     Render visual indicators and badges when the game ends in a draw.
 
@@ -856,7 +856,7 @@ def stalemate_animation(screen: pg.Surface, gs: chess_engine.GameState, board_fl
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : GameState
         The game state tracking both kings.
     board_flipped : bool
         Flag dictating whether the board rendering is reversed.

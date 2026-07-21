@@ -2,7 +2,7 @@
 AI move finder built on a negamax alpha-beta search framework.
 
 Implements the classic "strong engine" stack on top of the lightweight
-tuple-move interface exposed by `chess_engine.GameState`:
+tuple-move interface exposed by `board.GameState`:
 
 - Iterative deepening with a soft time limit
 - Negamax with alpha-beta pruning
@@ -25,12 +25,13 @@ import random
 import time
 from collections.abc import Callable
 
-from engine.chess_engine import (
+from engine.board import (
     AI_PROMO_TYPE, GameState, PIECE_TYPE,
     EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     WP, WN, WB, WR, WQ, WK, BP, BN, BB, BR, BQ, BK,
     ALL_DIRECTIONS, DIAGONAL_DIRECTIONS, KNIGHT_DELTAS, ORTHOGONAL_DIRECTIONS,
 )
+from engine.movegen import generate_legal
 
 # Type alias for the lightweight move format shared with chess_engine
 MoveTuple = tuple[int, int, int, int, int]
@@ -742,7 +743,7 @@ def search_position(
         score is a mate/draw score for the terminal position.
     """
     if valid_moves is None:
-        valid_moves = gs.get_valid_moves(for_ai=True)
+        valid_moves = generate_legal(gs, for_ai=True)
     if not valid_moves:
         # Terminal position: mated (score from the loser's perspective) or
         # stalemated. Mirrors the scoring inside _negamax at ply 0.
@@ -1071,7 +1072,7 @@ def _negamax(
     if depth <= 0:
         return _quiescence(gs, alpha, beta, ply, info)
 
-    moves = gs.get_valid_moves(for_ai=True)
+    moves = generate_legal(gs, for_ai=True)
     in_check = gs.in_check
 
     if not moves:
@@ -1292,7 +1293,7 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
     # evasion list instead, so an empty result there is a real checkmate —
     # while an empty captures-only list simply means the position is quiet
     # and the stand-pat score above already bounds it.
-    noisy = gs.get_valid_moves(for_ai=True, captures_only=True)
+    noisy = generate_legal(gs, for_ai=True, captures_only=True)
     if not noisy:
         return -(CHECKMATE_SCORE - ply) if gs.in_check else alpha
 

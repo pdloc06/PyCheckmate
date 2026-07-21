@@ -10,7 +10,8 @@ import sys
 import pytest
 
 from engine import uci_client
-from engine.chess_engine import GameState, Move
+from engine.board import GameState, Move
+from engine.movegen import generate_legal
 
 
 @pytest.fixture(scope='module')
@@ -29,7 +30,7 @@ def test_search_from_startpos_returns_legal_move(client):
     gs = GameState()
     legal = {
         Move.from_ai_tuple(move, gs.board).get_uci_notation()
-        for move in gs.get_valid_moves(for_ai=True)
+        for move in generate_legal(gs, for_ai=True)
     }
     assert best in legal
 

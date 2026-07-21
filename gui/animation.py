@@ -6,12 +6,12 @@ moving smoothly from their start squares to their end squares.
 """
 import pygame as pg
 import config
-from engine import chess_engine
+from engine.board import EMPTY, INT_TO_CODE, Move
 from gui import graphics
 
 
 def animate_move(
-    move: chess_engine.Move,
+    move: Move,
     screen: pg.Surface,
     board: list[list[int]],
     clock: pg.time.Clock,
@@ -24,7 +24,7 @@ def animate_move(
 
     Parameters
     ----------
-    move : chess_engine.Move
+    move : Move
         The move entity encapsulating coordinate changes.
     screen : pygame.Surface
         The main display surface.
@@ -84,8 +84,8 @@ def animate_move(
 
         # Redraw captured piece if necessary to keep it visible until overwritten
         # (config.IMAGES is keyed by the two-char code, so convert the int here)
-        if not move_unmake and move.piece_captured != chess_engine.EMPTY:
-            captured_image = config.IMAGES[chess_engine.INT_TO_CODE[move.piece_captured]]
+        if not move_unmake and move.piece_captured != EMPTY:
+            captured_image = config.IMAGES[INT_TO_CODE[move.piece_captured]]
             if move.is_enpassant_move:
                 ep_x, ep_y = graphics.board_to_screen(move.start_row, move.end_col, board_flipped)
                 enpassant_square = pg.Rect(ep_x, ep_y, config.SQ_SIZE, config.SQ_SIZE)
@@ -94,7 +94,7 @@ def animate_move(
                 screen.blit(captured_image, erase_square)
 
         # Draw the moving piece at its current interpolated position
-        moved_image = config.IMAGES[chess_engine.INT_TO_CODE[move.piece_moved]]
+        moved_image = config.IMAGES[INT_TO_CODE[move.piece_moved]]
         screen.blit(moved_image, pg.Rect(x, y, config.SQ_SIZE, config.SQ_SIZE))
 
         pg.display.flip()

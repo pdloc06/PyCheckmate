@@ -8,7 +8,8 @@ exercise the pure budgeting/parsing functions directly — no search needed —
 plus one end-to-end `handle_go` call per interesting path.
 """
 from engine import uci
-from engine.chess_engine import GameState, Move
+from engine.board import GameState, Move
+from engine.movegen import generate_legal
 
 
 # --- clock_move_budget: remaining / moves-left + 0.8*increment -------------
@@ -152,7 +153,7 @@ def test_handle_go_with_clock_returns_legal_move():
 
     legal = {
         Move.from_ai_tuple(move, gs.board).get_uci_notation()
-        for move in gs.get_valid_moves(for_ai=True)
+        for move in generate_legal(gs, for_ai=True)
     }
     assert best in legal
 

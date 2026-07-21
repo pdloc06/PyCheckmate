@@ -15,7 +15,9 @@ Supported commands: `uci`, `isready`, `ucinewgame`,
 """
 import sys
 
-from engine import chess_engine, move_finder
+from engine import move_finder
+from engine.board import GameState, Move
+from engine.movegen import generate_legal
 
 ENGINE_NAME = 'PyCheckmate'
 ENGINE_AUTHOR = 'Lucas Pham'
@@ -134,13 +136,13 @@ _initial_clock_s: float | None = None
 TT_MAX_ENTRIES = 2_000_000
 
 
-def apply_uci_move(gs: chess_engine.GameState, uci_str: str) -> bool:
+def apply_uci_move(gs: GameState, uci_str: str) -> bool:
     """
     Apply a move given in UCI coordinate notation to the game state.
 
     Parameters
     ----------
-    gs : chess_engine.GameState
+    gs : GameState
         The game state to mutate.
     uci_str : str
         The move in UCI notation (e.g., 'e2e4', 'e7e8q').
@@ -150,14 +152,14 @@ def apply_uci_move(gs: chess_engine.GameState, uci_str: str) -> bool:
     bool
         True if the move matched a legal move and was applied, else False.
     """
-    for move in gs.get_valid_moves():
+    for move in generate_legal(gs):
         if move.get_uci_notation() == uci_str:
             gs.make_move(move, annotate=False)
             return True
     return False
 
 
-def build_position(tokens: list[str]) -> chess_engine.GameState:
+def build_position(tokens: list[str]) -> GameState:
     """
     Build a GameState from the arguments of a UCI `position` command.
 
@@ -170,7 +172,7 @@ def build_position(tokens: list[str]) -> chess_engine.GameState:
 
     Returns
     -------
-    chess_engine.GameState
+    GameState
         The reconstructed game state after all listed moves.
 
     Raises
@@ -182,7 +184,7 @@ def build_position(tokens: list[str]) -> chess_engine.GameState:
         raise ValueError('position: missing arguments')
 
     if tokens[0] == 'startpos':
-        gs = chess_engine.GameState()
+        gs = GameState()
         move_tokens = tokens[2:] if len(tokens) > 1 and tokens[1] == 'moves' else []
     elif tokens[0] == 'fen':
         # FEN is 6 space-separated fields; 'moves' may follow
@@ -193,7 +195,7 @@ def build_position(tokens: list[str]) -> chess_engine.GameState:
         else:
             fen = ' '.join(tokens[1:])
             move_tokens = []
-        gs = chess_engine.GameState.from_fen(fen)
+        gs = GameState.from_fen(fen)
     else:
         raise ValueError(f'position: unknown mode {tokens[0]!r}')
 
@@ -424,20 +426,20 @@ def report_iteration(depth: int, score: int, nodes: int, elapsed: float,
     else:
         report = f'cp {score}'
 
-    best_uci = chess_engine.Move.from_ai_tuple(move, board).get_uci_notation()
+    best_uci = Move.from_ai_tuple(move, board).get_uci_notation()
     nps = int(nodes / elapsed) if elapsed > 0 else 0
     print(f'info depth {depth} score {report} nodes {nodes} nps {nps} '
           f'time {int(elapsed * 1000)} pv {best_uci}')
     sys.stdout.flush()
 
 
-def handle_go(gs: chess_engine.GameState, tokens: list[str]) -> str:
+def handle_go(gs: GameState, tokens: list[str]) -> str:
     """
     Execute a UCI `go` command and return the chosen move in UCI notation.
 
     Parameters
     ----------
-    gs : chess_engine.GameState
+    gs : GameState
         The game state to search from.
     tokens : list of str
         The command arguments after 'go' (e.g., ['depth', '4'],
@@ -466,7 +468,7 @@ def handle_go(gs: chess_engine.GameState, tokens: list[str]) -> str:
     if best is None:
         return '0000'  # UCI null move: no legal moves available
 
-    return chess_engine.Move.from_ai_tuple(best, gs.board).get_uci_notation()
+    return Move.from_ai_tuple(best, gs.board).get_uci_notation()
 
 
 def main() -> None:
@@ -477,7 +479,7 @@ def main() -> None:
     -------
     None
     """
-    gs = chess_engine.GameState()
+    gs = GameState()
 
     for line in sys.stdin:
         parts = line.strip().split()
@@ -494,7 +496,7 @@ def main() -> None:
             print('readyok')
 
         elif command == 'ucinewgame':
-            gs = chess_engine.GameState()
+            gs = GameState()
             # A new game means new positions: drop the accumulated table
             transposition_table.clear()
             # ...and a possibly different time control, so re-learn the clock.

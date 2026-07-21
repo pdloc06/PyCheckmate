@@ -6,7 +6,7 @@ detection, and full-game replay.
 import pytest
 
 from engine import pgn
-from engine.chess_engine import GameState
+from engine.board import GameState
 
 
 # --- FEN detection ---

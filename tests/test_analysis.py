@@ -6,8 +6,9 @@ opening-book lookups, and the background whole-game analyser.
 import time
 
 from engine import analysis
-from engine.chess_engine import GameState
+from engine.board import GameState
 from engine.move_finder import CHECKMATE_SCORE, search_position
+from engine.movegen import generate_legal
 
 
 def _eval(score_white: int, best=None, legal: int = 20) -> analysis.PositionEval:
@@ -172,7 +173,7 @@ def test_evaluate_position_reports_white_perspective():
 def test_search_position_scores_terminal_positions():
     """Verify the score interface handles mate and stalemate roots."""
     mated = GameState.from_fen('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3')
-    mated.get_valid_moves(for_ai=True)
+    generate_legal(mated, for_ai=True)
     move, score = search_position(mated, max_depth=2, time_limit=5.0)
     assert move is None and score == -CHECKMATE_SCORE
 

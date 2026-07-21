@@ -2,7 +2,8 @@
 Test suite covering game states: Absolute Pins, Checks, Checkmates,
 Stalemates, and Draw Mechanics (50-move rule, Threefold Repetition).
 """
-from engine.chess_engine import Move, WN, WR, BN
+from engine.board import Move, WN, WR, BN
+from engine.movegen import generate_legal
 
 
 def test_absolute_pin(custom_gs):
@@ -14,7 +15,7 @@ def test_absolute_pin(custom_gs):
     empty_board[0][0] = 'bK'
 
     gs = custom_gs(empty_board)
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
 
     knight_moves = [m for m in valid_moves if m.piece_moved == WN]
     assert len(knight_moves) == 0
@@ -27,7 +28,7 @@ def test_fools_mate(gs):
     gs.make_move(Move((6, 6), (4, 6), gs.board))  # g4
     gs.make_move(Move((0, 3), (4, 7), gs.board))  # Qh4#
 
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
     assert len(valid_moves) == 0
     assert gs.is_checkmate is True
     assert gs.is_stalemate is False
@@ -41,7 +42,7 @@ def test_stalemate_edge_case(custom_gs):
     empty_board[2][6] = 'wQ'  # g6
 
     gs = custom_gs(empty_board, white_turn=False)
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
 
     assert len(valid_moves) == 0
     assert gs.is_checkmate is False
@@ -57,7 +58,7 @@ def test_promotion_to_block_check(custom_gs):
     empty_board[0][7] = 'bK'
 
     gs = custom_gs(empty_board)
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
     promotion_capture = Move.promotion((1, 1), (0, 0), gs.board)
     assert promotion_capture in valid_moves
 
@@ -66,7 +67,7 @@ def test_50_move_rule_triggers_draw(gs):
     """Verify reaching 100 half-moves without pawn moves or captures triggers a draw."""
     gs.halfmove_clock = 99
     gs.make_move(Move((7, 6), (5, 5), gs.board))  # Nf3
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
 
     assert gs.halfmove_clock == 100
     assert gs.is_stalemate is True
@@ -126,7 +127,7 @@ def test_threefold_repetition(gs):
     m4_2 = Move.normal((2, 5), (0, 6), gs.board)
     gs.make_move(m4_2)
 
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
     assert gs.is_stalemate is True
     assert len(valid_moves) == 0
 

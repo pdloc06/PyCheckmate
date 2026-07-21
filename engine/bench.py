@@ -39,7 +39,8 @@ import sys
 import time
 
 from engine import move_finder
-from engine.chess_engine import GameState
+from engine.board import GameState
+from engine.movegen import generate_legal
 
 # Root move order is shuffled per search (`move_finder._root_rng`) so that
 # self-play games vary. That shuffle also changes how much the search can
@@ -71,7 +72,7 @@ def perft(gs: GameState, depth: int) -> int:
     if depth == 0:
         return 1
     total = 0
-    for move in gs.get_valid_moves(for_ai=True):
+    for move in generate_legal(gs, for_ai=True):
         undo = gs.make_ai_move(move)
         total += perft(gs, depth - 1)
         gs.unmake_ai_move(move, undo)

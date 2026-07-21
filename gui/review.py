@@ -13,7 +13,7 @@ import sys
 
 import pygame as pg
 import config
-from engine import analysis, chess_engine
+from engine import analysis, board
 from gui import graphics, ui
 
 # Move-list layout (mirrors the spirit of ui.draw_move_log, but with an icon
@@ -27,7 +27,7 @@ VARIATION_BAR_HEIGHT = 30     # "Back to game" strip above a variation's moves
 # the drawing/hit-testing functions: (base, moves, worker, cursor) — the
 # mainline position index it branched from, its moves, its own analyser,
 # and how many of its moves are currently applied to the board.
-Variation = tuple[int, list[chess_engine.Move], analysis.GameAnalysis, int]
+Variation = tuple[int, list[board.Move], analysis.GameAnalysis, int]
 
 # X offsets inside the panel: move number, then icon+text per color column
 _NUM_X = 8
@@ -163,7 +163,7 @@ def _rows_geometry(
 
 def _draw_move_rows(
     screen: pg.Surface,
-    moves: list[chess_engine.Move],
+    moves: list[board.Move],
     tags: list[str | None],
     selected: int,
     font: pg.font.Font,
@@ -180,7 +180,7 @@ def _draw_move_rows(
     ----------
     screen : pygame.Surface
         The main display surface.
-    moves : list of chess_engine.Move
+    moves : list of board.Move
         The half-moves to render, in order.
     tags : list of str or None
         Quality tag per move (None while its analysis is pending).
@@ -243,7 +243,7 @@ def _draw_move_rows(
 
 def draw_review_panel(
     screen: pg.Surface,
-    moves: list[chess_engine.Move],
+    moves: list[board.Move],
     game_analysis: analysis.GameAnalysis,
     cursor: int,
     font: pg.font.Font,
@@ -260,7 +260,7 @@ def draw_review_panel(
     ----------
     screen : pygame.Surface
         The main display surface.
-    moves : list of chess_engine.Move
+    moves : list of board.Move
         Every move of the reviewed game, in order.
     game_analysis : analysis.GameAnalysis
         The background analyser (provides tags, progress, and accuracy).
@@ -446,7 +446,7 @@ def draw_eval_bar(
 
 def draw_move_badge(
     screen: pg.Surface,
-    move: chess_engine.Move,
+    move: board.Move,
     tag: str,
     board_flipped: bool,
 ) -> None:
@@ -460,7 +460,7 @@ def draw_move_badge(
     ----------
     screen : pygame.Surface
         The main display surface.
-    move : chess_engine.Move
+    move : board.Move
         The move being displayed on the board.
     tag : str
         The move's quality tag (an `engine.analysis` tag constant).
@@ -479,7 +479,7 @@ def draw_move_badge(
     screen.blit(icon, (x + config.SQ_SIZE - size - 1, y + 1))
 
 
-def draw_end_badges(screen: pg.Surface, gs: chess_engine.GameState, board_flipped: bool) -> None:
+def draw_end_badges(screen: pg.Surface, gs: board.GameState, board_flipped: bool) -> None:
     """
     Draw the end-of-game icons on the kings at the final position.
 
@@ -490,7 +490,7 @@ def draw_end_badges(screen: pg.Surface, gs: chess_engine.GameState, board_flippe
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : board.GameState
         The final position (its checkmate/stalemate flags must be current).
     board_flipped : bool
         Flag indicating whether the board perspective is currently flipped.
@@ -576,7 +576,7 @@ def draw_best_move_arrow(
     screen.blit(overlay, (0, 0))
 
 
-def draw_review_bars(screen: pg.Surface, gs: chess_engine.GameState, font: pg.font.Font,
+def draw_review_bars(screen: pg.Surface, gs: board.GameState, font: pg.font.Font,
                      board_flipped: bool) -> None:
     """
     Draw minimal top/bottom player bars for the review screen.
@@ -588,7 +588,7 @@ def draw_review_bars(screen: pg.Surface, gs: chess_engine.GameState, font: pg.fo
     ----------
     screen : pygame.Surface
         The main display surface.
-    gs : chess_engine.GameState
+    gs : board.GameState
         The displayed position.
     font : pygame.font.Font
         Font for the color labels.

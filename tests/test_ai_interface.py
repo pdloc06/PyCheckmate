@@ -5,7 +5,8 @@ moves, FEN round trips, and AI tuple <-> Move conversions.
 """
 import random
 
-from engine.chess_engine import GameState, Move, PIECE_TYPE, EMPTY, KING, WP, WR, WK, BP
+from engine.board import GameState, Move, PIECE_TYPE, EMPTY, KING, WP, WR, WK, BP
+from engine.movegen import generate_legal
 
 START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 
@@ -16,7 +17,7 @@ def perft(gs: GameState, depth: int) -> int:
     if depth == 0:
         return 1
     total = 0
-    for move in gs.get_valid_moves(for_ai=True):
+    for move in generate_legal(gs, for_ai=True):
         undo = gs.make_ai_move(move)
         total += perft(gs, depth - 1)
         gs.unmake_ai_move(move, undo)
@@ -68,7 +69,7 @@ def test_king_can_step_beside_blocked_enemy_pawn():
     gs = GameState.from_fen('rnbqkbnr/ppp1pppp/8/8/3p4/4P3/PPPPKPPP/RNBQ1BNR w kq - 0 3')
     king_moves = {
         Move.from_ai_tuple(move, gs.board).get_uci_notation()
-        for move in gs.get_valid_moves(for_ai=True)
+        for move in generate_legal(gs, for_ai=True)
         if PIECE_TYPE[gs.board[move[0]][move[1]]] == KING
     }
     assert king_moves == {'e2d3', 'e2e1', 'e2f3'}
@@ -96,7 +97,7 @@ def test_ai_move_random_walk_keeps_state_synced(gs):
     clocks = []
 
     for _ in range(300):
-        moves = gs.get_valid_moves(for_ai=True)
+        moves = generate_legal(gs, for_ai=True)
         if not moves:
             break
         move = rng.choice(moves)
@@ -126,12 +127,12 @@ def test_ai_move_halfmove_clock_matches_the_ui_path(gs):
     rule is that it agrees with the rules the game is actually scored by. A
     pawn move or capture resets; anything else increments.
     """
-    from engine.chess_engine import Move
+    from engine.board import Move
 
     rng = random.Random(7)
     ai_state, ui_state = GameState(), GameState()
     for _ in range(120):
-        moves = ai_state.get_valid_moves(for_ai=True)
+        moves = generate_legal(ai_state, for_ai=True)
         if not moves:
             break
         move = rng.choice(moves)
@@ -235,7 +236,7 @@ def test_from_fen_castling_rights():
 # --- Move conversions and UCI notation ---
 def test_move_ai_tuple_round_trip(gs):
     """Verify Move -> tuple -> Move survives for every legal opening move."""
-    for move in gs.get_valid_moves():
+    for move in generate_legal(gs):
         rebuilt = Move.from_ai_tuple(move.to_ai_tuple(), gs.board)
         assert rebuilt == move
 

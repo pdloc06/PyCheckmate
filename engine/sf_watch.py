@@ -43,7 +43,7 @@ import sys
 import time
 
 from engine import pgn
-from engine.chess_engine import GameState
+from engine.board import GameState
 from engine.sf_review import (
     BLUNDER, DEFAULT_RECORDS, INACCURACY, MAX_CPL, MISTAKE, OUR_NAME,
     SF_HASH_MB, SF_THREADS, find_stockfish, move_accuracy, white_pov,

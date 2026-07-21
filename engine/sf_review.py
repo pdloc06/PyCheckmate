@@ -37,7 +37,7 @@ import shutil
 import sys
 
 from engine import pgn
-from engine.chess_engine import GameState
+from engine.board import GameState
 from engine.uci_client import EngineClientError, UciEngineClient
 
 # Where lichess-bot drops its PGNs (config.yml: pgn_directory)

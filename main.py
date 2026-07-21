@@ -15,8 +15,9 @@ import threading
 
 import pygame as pg
 import config
-from engine import analysis, chess_engine, move_finder, pgn, uci_client
+from engine import analysis, board, move_finder, pgn, uci_client
 from gui import graphics, ui, animation, review
+from engine.movegen import generate_legal
 
 # Type alias matching move_finder's lightweight move format
 MoveTuple = tuple[int, int, int, int, int]
@@ -170,7 +171,7 @@ def run_time_control_menu(
 _ai_transposition_table: move_finder.TTable = {}
 
 
-def start_ai_search(gs: chess_engine.GameState, generation: int, holder: dict) -> None:
+def start_ai_search(gs: board.GameState, generation: int, holder: dict) -> None:
     """
     Launch the AI move search on a background daemon thread.
 
@@ -180,7 +181,7 @@ def start_ai_search(gs: chess_engine.GameState, generation: int, holder: dict) -
 
     Parameters
     ----------
-    gs : chess_engine.GameState
+    gs : board.GameState
         The live game state to search from (not mutated).
     generation : int
         Tag identifying this search; stale results (from searches invalidated
@@ -193,7 +194,7 @@ def start_ai_search(gs: chess_engine.GameState, generation: int, holder: dict) -
     -------
     None
     """
-    search_gs = chess_engine.GameState.from_fen(gs.to_fen())
+    search_gs = board.GameState.from_fen(gs.to_fen())
     # Carry the real game's position history over so the engine can detect
     # (or aim for) threefold repetitions correctly
     search_gs.zobrist_history = list(gs.zobrist_history)
@@ -216,8 +217,8 @@ def start_ai_search(gs: chess_engine.GameState, generation: int, holder: dict) -
                 )
                 best = next(
                     (
-                        move for move in search_gs.get_valid_moves(for_ai=True)
-                        if chess_engine.Move.from_ai_tuple(move, search_gs.board)
+                        move for move in generate_legal(search_gs, for_ai=True)
+                        if board.Move.from_ai_tuple(move, search_gs.board)
                         .get_uci_notation() == best_uci
                     ),
                     None,
@@ -239,7 +240,7 @@ def start_ai_search(gs: chess_engine.GameState, generation: int, holder: dict) -
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def _parse_imported_game(text: str) -> chess_engine.GameState:
+def _parse_imported_game(text: str) -> board.GameState:
     """
     Turn the import screen's text buffer into a replayed GameState.
 
@@ -251,7 +252,7 @@ def _parse_imported_game(text: str) -> chess_engine.GameState:
 
     Returns
     -------
-    chess_engine.GameState
+    board.GameState
         The imported game, with any moves already applied.
 
     Raises
@@ -267,14 +268,14 @@ def _parse_imported_game(text: str) -> chess_engine.GameState:
         placement = stripped.split()[0]
         if placement.count('K') != 1 or placement.count('k') != 1:
             raise ValueError('A FEN needs exactly one king per side')
-        gs = chess_engine.GameState.from_fen(stripped)
-        gs.get_valid_moves()  # Prime the check/terminal flags for rendering
+        gs = board.GameState.from_fen(stripped)
+        generate_legal(gs)  # Prime the check/terminal flags for rendering
         return gs
 
     return pgn.game_from_pgn(stripped)
 
 
-def _clone_game_for_review(gs: chess_engine.GameState) -> chess_engine.GameState:
+def _clone_game_for_review(gs: board.GameState) -> board.GameState:
     """
     Rebuild the current game on a fresh GameState for reviewing.
 
@@ -284,24 +285,24 @@ def _clone_game_for_review(gs: chess_engine.GameState) -> chess_engine.GameState
 
     Parameters
     ----------
-    gs : chess_engine.GameState
+    gs : board.GameState
         The live game (games always start from the standard position).
 
     Returns
     -------
-    chess_engine.GameState
+    board.GameState
         An independent copy holding the same move history.
     """
-    clone = chess_engine.GameState()
+    clone = board.GameState()
     for played in gs.move_log:
         target = played.to_ai_tuple()
         matched = next(
-            move for move in clone.get_valid_moves()
+            move for move in generate_legal(clone)
             if move.to_ai_tuple() == target
         )
         clone.make_move(matched)
 
-    clone.get_valid_moves()  # Refresh terminal flags
+    generate_legal(clone)  # Refresh terminal flags
     if clone.is_checkmate and clone.move_log:
         clone.move_log[-1].is_checkmate = True
         clone.move_log[-1].is_check = False
@@ -313,7 +314,7 @@ def run_import_menu(
     clock: pg.time.Clock,
     title_font: pg.font.Font,
     font: pg.font.Font,
-) -> chess_engine.GameState | str:
+) -> board.GameState | str:
     """
     Display the Game Analysis import screen and collect a FEN or PGN.
 
@@ -330,7 +331,7 @@ def run_import_menu(
 
     Returns
     -------
-    chess_engine.GameState or str
+    board.GameState or str
         The successfully imported game, or the sentinel strings 'back'
         (return to the main menu) / 'quit' (window closed).
     """
@@ -381,7 +382,7 @@ def run_review(
     move_log_font: pg.font.Font,
     coord_font: pg.font.Font,
     bar_font: pg.font.Font,
-    gs: chess_engine.GameState,
+    gs: board.GameState,
 ) -> str | None:
     """
     Run the game-review screen for an imported or just-played game.
@@ -406,7 +407,7 @@ def run_review(
         Font for the board coordinate labels.
     bar_font : pygame.font.Font
         Font for the player bars.
-    gs : chess_engine.GameState
+    gs : board.GameState
         The game to review. Must be a dedicated copy: the review rewinds and
         replays it, and can append exploration moves.
 
@@ -423,7 +424,7 @@ def run_review(
     eval_font = pg.font.SysFont('Arial', 11, bold=True)
 
     # Rewind to the first position; its FEN seeds the background analyser
-    all_moves: list[chess_engine.Move] = list(gs.move_log)
+    all_moves: list[board.Move] = list(gs.move_log)
     for _ in range(len(all_moves)):
         gs.unmake_move()
     start_fen = gs.to_fen()
@@ -437,7 +438,7 @@ def run_review(
     )
 
     board_flipped = False
-    valid_moves = gs.get_valid_moves()
+    valid_moves = generate_legal(gs)
     sq_selected: tuple[int, int] | None = None
     player_clicks: list[tuple[int, int]] = []
     displayed_share = 0.5  # Smoothed eval-bar position (chess.com-style glide)
@@ -449,7 +450,7 @@ def run_review(
     # keeps running in the background the whole time.
     var_fen = ''
     var_base = 0
-    var_moves: list[chess_engine.Move] = []
+    var_moves: list[board.Move] = []
     var_worker: analysis.GameAnalysis | None = None
     var_cursor = 0
 
@@ -462,11 +463,11 @@ def run_review(
     def refresh_position() -> None:
         """Regenerate legal moves and clear the click selection after a nav."""
         nonlocal valid_moves, sq_selected, player_clicks
-        valid_moves = gs.get_valid_moves()
+        valid_moves = generate_legal(gs)
         sq_selected = None
         player_clicks = []
 
-    def mark_terminal(move: chess_engine.Move) -> None:
+    def mark_terminal(move: board.Move) -> None:
         """Stamp '#' on a just-played mating move (flags are already fresh)."""
         if gs.is_checkmate:
             move.is_checkmate = True
@@ -561,7 +562,7 @@ def run_review(
         else:
             go_to(cursor - 1, animate=True)
 
-    def play_board_move(matched: chess_engine.Move) -> None:
+    def play_board_move(matched: board.Move) -> None:
         """
         Handle a move the user played on the board, branching if needed.
 
@@ -785,17 +786,17 @@ def run_game(
         caller should loop back to the opponent menu); False if the window
         was closed instead.
     """
-    gs = chess_engine.GameState()
-    valid_moves = gs.get_valid_moves()
+    gs = board.GameState()
+    valid_moves = generate_legal(gs)
 
     # State flags for move execution and animation
     move_made = False
     move_unmake = False
     move_to_unmake = None  # Temp variable to store move to undo for animation purposes
 
-    undone_moves: list[chess_engine.Move] = []  # Stack to manage forward and backward history
+    undone_moves: list[board.Move] = []  # Stack to manage forward and backward history
     board_flipped = False  # State flag for flipping the board view
-    promoting_move: chess_engine.Move | None = None  # Stores the move object temporarily when a pawn promotes
+    promoting_move: board.Move | None = None  # Stores the move object temporarily when a pawn promotes
     return_to_menu = False  # Set when the player clicks "Main Menu" instead of closing the window
 
     running = True
@@ -836,7 +837,7 @@ def run_game(
         if clocks is not None:
             clocks[mover_color] += increment
 
-    def commit_move(move: chess_engine.Move) -> None:
+    def commit_move(move: board.Move) -> None:
         """Play a live move: apply it, credit the increment, clear the redo stack."""
         nonlocal move_made
         mover_color = gs.friendly_color
@@ -876,8 +877,8 @@ def run_game(
         nonlocal move_made, move_unmake, move_to_unmake, promoting_move, game_over
         nonlocal clocks, flag_fallen
         invalidate_ai_search()
-        gs = chess_engine.GameState()
-        valid_moves = gs.get_valid_moves()
+        gs = board.GameState()
+        valid_moves = generate_legal(gs)
         sq_selected = None
         player_clicks = []
         move_made = False
@@ -1059,7 +1060,7 @@ def run_game(
                 ai_thinking = False
 
                 if ai_move_tuple is not None:
-                    ai_move = chess_engine.Move.from_ai_tuple(ai_move_tuple, gs.board)
+                    ai_move = board.Move.from_ai_tuple(ai_move_tuple, gs.board)
                     # Reuse the pre-generated Move so notation metadata
                     # (disambiguation) stays intact in the move log
                     matched = next((m for m in valid_moves if m == ai_move), ai_move)
@@ -1074,7 +1075,7 @@ def run_game(
             elif len(gs.move_log) > 0:
                 animation.animate_move(gs.move_log[-1], screen, gs.board, clock, board_flipped, coord_font)
 
-            valid_moves = gs.get_valid_moves()
+            valid_moves = generate_legal(gs)
 
             # Identify absolute checkmate to format `#` in notation
             if gs.is_checkmate and len(gs.move_log) > 0:
@@ -1157,7 +1158,7 @@ def main() -> None:
                     break
                 if imported == 'back':
                     break
-                assert isinstance(imported, chess_engine.GameState)
+                assert isinstance(imported, board.GameState)
                 outcome = run_review(screen, clock, move_log_font, coord_font, bar_font, imported)
                 screen = pg.display.get_surface() or screen
                 if outcome is None:

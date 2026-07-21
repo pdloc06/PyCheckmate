@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 
 from engine import pgn
-from engine.chess_engine import (
+from engine.board import (
     ALL_DIRECTIONS,
     KNIGHT_DELTAS,
     GameState,
@@ -49,6 +49,7 @@ from engine.move_finder import (
     PIECE_VALUES,
     search_position,
 )
+from engine.movegen import generate_legal
 
 # Type alias matching move_finder's lightweight move format
 MoveTuple = tuple[int, int, int, int, int]
@@ -209,7 +210,7 @@ def evaluate_position(
     PositionEval
         Score (White's perspective), best move, and legal move count.
     """
-    moves = gs.get_valid_moves(for_ai=True)
+    moves = generate_legal(gs, for_ai=True)
     legal_count = len(moves)
     if exclude is not None:
         moves = [m for m in moves if m != exclude]
