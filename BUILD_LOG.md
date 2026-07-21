@@ -511,6 +511,62 @@ signal working does not mean the change is worth anything. Returning time to
 the endgame only pays if the endgame spends it well, and only the rated-games
 run can say.
 
+### Staged move ordering: built, measured, reverted (2026-07-21)
+
+`ENGINE_V2_PLAN.md` §5.3 lists staged generation — "yield TT move → captures →
+killers → quiets, so a cutoff on the TT move never pays for generating quiets
+at all… a node-count win *and* a time win". Instrumenting the search first
+turned that from a slogan into numbers, over 13,534 generating nodes:
+
+| | share of generating nodes |
+| --- | --- |
+| any beta cutoff | 71.0% |
+| cutoff on the first move tried | 62.8% |
+| cutoff on the **TT move** specifically | 18.2% |
+| **cutoff before any quiet was needed** | **46.0%** |
+| quiet share of generated moves | 93.3% |
+
+The TT-move framing undersells it by 2.5x — only 25% of nodes have a TT move
+at all, and most first-move cutoffs come from MVV-LVA and killers rather than
+the table.
+
+**Two measurements then redirected the work, and a third killed it.**
+
+*Staged generation is worth little here.* A noisy-only pass costs **78-80%** of
+a full pass in typical positions, because the generator walks every piece and
+every ray either way — `captures_only` merely declines to append. So skipping
+quiets saves ~20% of generation, and `0.46 x 0.20 x 0.37 ≈ 3%` of search time,
+before paying for a second stage on the other 54% of nodes.
+
+*Ordering looked like the better target.* Scoring and sorting costs **35-41%**
+of combined generate-and-order time, and unlike generation it is entirely
+skippable for moves never searched. Estimated ~9%. So the build became staged
+*ordering*: partition by a board lookup per move, score and sort only what
+outranks a killer, and score the remaining ~93% lazily.
+
+*It measured neutral.* Best-of-5 back to back, CPython 3.29-3.33s against a
+3.27-3.59s baseline; PyPy 2.59-2.68s against 2.60-2.88s. Overlapping ranges on
+both interpreters, so by this project's own rule there is nothing to believe.
+Reverted.
+
+**Why the 9% did not appear** — the part worth keeping, because it tells the
+next attempt what to fix. The saving lands on 46% of nodes, but the machinery
+is paid on 100% of them: a generator's per-yield cost, a partition pass over
+every move, and a scorer promoted from a closure to a six-argument module
+function so both paths could share one definition. Python call overhead on
+every node cancelled the scoring skipped on some of them. A version that keeps
+the closure and avoids the generator might still win; this one had its cost in
+exactly the place its benefit was supposed to come from.
+
+**One sub-result is solid and worth reusing.** Staged *yielding* with eager
+scoring reproduces the old order exactly — 59,410 nodes against 59,410 — which
+proves the band partition is sound (first stage >= 900,000, losing captures
+held back below killers at `300_000 + SEE`). The node count only moved once
+scoring went lazy, to 59,092: stage-2 quiets get scored against a history table
+that stage-1 subtrees have already updated. Fresher information, 0.5% fewer
+nodes, and a reminder that lazy scoring is not automatically behavior-neutral
+even when lazy *ordering* is.
+
 ---
 
 ## Performance Benchmarks
