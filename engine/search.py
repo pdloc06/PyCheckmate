@@ -30,14 +30,14 @@ import time
 from typing import Callable
 
 from engine.board import (
-    AI_PROMO_TYPE, BISHOP, BN, BP, EMPTY, GameState, KING, PAWN, PIECE_TYPE,
+    AI_PROMO_TYPE, BISHOP, BN, BP, EMPTY, GameState, KING, PIECE_TYPE,
     QUEEN, ROOK, WB, WN, WP, WQ, WR,
 )
 from engine.eval import (
     CHECKMATE_SCORE, DRAW_SCORE, MATE_THRESHOLD, PIECE_VALUES,
     _has_major_material, _rays_from, evaluate,
 )
-from engine.movegen import MoveTuple, generate_captures, generate_legal
+from engine.movegen import MoveTuple, generate_legal
 from engine.tt import TT_EXACT, TT_LOWER, TT_UPPER, TTable
 
 # --- The 50-move rule, as the search sees it ----------------------------

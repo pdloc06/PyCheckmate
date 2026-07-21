@@ -19,10 +19,10 @@ There are two shapes of output, and the caller picks with `for_ai`:
   hashing, because the search tracks repetition itself via Zobrist keys.
 """
 from engine.board import (
-    AI_PROMO_CODES, ALL_DIRECTIONS, BB, BISHOP, BK, BN, BP, BQ, BR,
+    ALL_DIRECTIONS, BISHOP, BK, BP, BR,
     DIAGONAL_DIRECTIONS, EMPTY, GameState, KING, KNIGHT, KNIGHT_DELTAS, Move,
     ORTHOGONAL_DIRECTIONS, PAWN, PIECE_TYPE, QUEEN, ROOK,
-    WB, WK, WN, WP, WQ, WR,
+    WK, WP, WR,
 )
 
 # Type alias for the lightweight move format the search expands
@@ -418,27 +418,6 @@ def _castle_moves(gs: GameState, row: int, col: int, possible_moves: list, for_a
             possible_moves.append((home, 4, home, 2, 1))
         else:
             possible_moves.append(Move.castle((home, 4), (home, 2), board))
-
-
-def generate_captures(gs: GameState, for_ai: bool = True) -> list:
-    """
-    Generate only the legal captures in a position, for quiescence search.
-
-    Parameters
-    ----------
-    gs : GameState
-        Position to generate for.
-    for_ai : bool, optional
-        Return 5-tuples rather than `Move` objects. Defaults to True, since
-        quiescence is the only caller that matters.
-
-    Returns
-    -------
-    list
-        Legal captures only. An empty list here says nothing about checkmate
-        or stalemate -- ask `generate_legal` for that.
-    """
-    return generate_legal(gs, for_ai=for_ai, captures_only=True)
 
 
 # Dispatch keyed by the 1-6 piece-type index (see PIECE_TYPE). A module

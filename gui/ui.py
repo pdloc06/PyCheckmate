@@ -5,11 +5,12 @@ This module is responsible for rendering all non-board graphical interfaces,
 including the main menu, the player info bars, the move history panel,
 control buttons, the pawn promotion menu, and endgame badges.
 """
+import functools
+
 import pygame as pg
 import config
 from engine.board import BP, EMPTY, GameState, INT_TO_CODE, Move
 from gui import graphics
-from engine.eval import PIECE_VALUES
 
 # Layout constants shared by draw_move_log and get_move_log_click_index so the
 # rendering and the click hit-testing can never drift apart
@@ -874,6 +875,25 @@ def stalemate_animation(screen: pg.Surface, gs: GameState, board_flipped: bool) 
         screen.blit(gray_surface, (x, y))
         draw_badge(screen, "Draw", pg.Color('white'), pg.Color('black'), x + config.SQ_SIZE, y)
 
+@functools.cache
+def _badge_font() -> pg.font.Font:
+    """
+    The badge font, loaded once.
+
+    `draw_badge` used to build this with `pg.font.SysFont` on every call — a
+    system font lookup and face load. The badges are drawn by the win,
+    stalemate and time-forfeit overlays, which run inside the main render loop
+    for as long as the end-of-game screen is up, so that was happening dozens
+    of times a second to draw a string that never changes.
+
+    Returns
+    -------
+    pg.font.Font
+        The cached font.
+    """
+    return pg.font.SysFont('Helvetica', 14, bold=True)
+
+
 def draw_badge(
     screen: pg.Surface,
     text: str,
@@ -904,8 +924,7 @@ def draw_badge(
     -------
     None
     """
-    font = pg.font.SysFont('Helvetica', 14, bold=True)
-    text_surface = font.render(text, True, text_color)
+    text_surface = _badge_font().render(text, True, text_color)
     text_rect = text_surface.get_rect()
 
     padding_x, padding_y = 12, 6

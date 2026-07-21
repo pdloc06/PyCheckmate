@@ -802,7 +802,6 @@ def run_game(
     return_to_menu = False  # Set when the player clicks "Main Menu" instead of closing the window
 
     running = True
-    game_over = False
     sq_selected: tuple[int, int] | None = None
     player_clicks: list[tuple[int, int]] = []
 
@@ -833,6 +832,20 @@ def run_game(
         """Check whether the side to move is controlled by a human."""
         player_one_color = 'b' if board_flipped else 'w'
         return (not vs_ai) or gs.friendly_color == player_one_color
+
+    def is_game_over() -> bool:
+        """
+        Report whether the game has ended, by any of its three routes.
+
+        Derived rather than stored, and that is the point. This used to be a
+        `game_over` flag that the move handler cleared and the render block
+        set again — but the render block only restored it for checkmate and
+        stalemate, never for a fallen flag. So undoing a move after losing on
+        time cleared the flag for good: the clock started ticking again and
+        the board accepted clicks, underneath a banner still announcing the
+        forfeit. Three sources of truth, two of them refreshed.
+        """
+        return gs.is_checkmate or gs.is_stalemate or flag_fallen is not None
 
     def apply_increment(mover_color: str) -> None:
         """Credit the increment to the player who just completed a live move."""
@@ -876,7 +889,7 @@ def run_game(
     def reset_game() -> None:
         """Restore a fresh GameState and clear every interaction flag."""
         nonlocal gs, valid_moves, sq_selected, player_clicks
-        nonlocal move_made, move_unmake, move_to_unmake, promoting_move, game_over
+        nonlocal move_made, move_unmake, move_to_unmake, promoting_move
         nonlocal clocks, flag_fallen
         invalidate_ai_search()
         gs = board.GameState()
@@ -887,7 +900,6 @@ def run_game(
         move_unmake = False
         move_to_unmake = None
         promoting_move = None
-        game_over = False
         undone_moves.clear()
         clocks = {'w': float(initial_time), 'b': float(initial_time)} if initial_time is not None else None
         flag_fallen = None
@@ -903,12 +915,11 @@ def run_game(
         # while a game is actually in progress (not mid-promotion or over).
         # Time spent inside animate_move's own render loop isn't charged
         # here since it ticks the same pygame Clock itself.
-        if clocks is not None and not game_over and promoting_move is None:
+        if clocks is not None and not is_game_over() and promoting_move is None:
             ticking_color = gs.friendly_color
             clocks[ticking_color] = max(0.0, clocks[ticking_color] - dt_ms / 1000)
             if clocks[ticking_color] <= 0.0 and flag_fallen is None:
                 flag_fallen = ticking_color
-                game_over = True
 
         for e in pg.event.get():
             if e.type == pg.QUIT:
@@ -945,7 +956,7 @@ def run_game(
 
                     # Ignore board clicks on the player bars, after the game
                     # has ended, or during the AI's turn
-                    if clicked_square is None or game_over or not human_turn or ai_thinking:
+                    if clicked_square is None or is_game_over() or not human_turn or ai_thinking:
                         continue
 
                     if sq_selected == clicked_square:
@@ -974,13 +985,13 @@ def run_game(
                 # Logic when a player clicks inside the move log panel area
                 else:
                     menu_btn, review_btn, prev_btn, next_btn, restart_btn, flip_btn = \
-                        ui.get_control_button_rects(show_review=game_over)
+                        ui.get_control_button_rects(show_review=is_game_over())
 
                     if menu_btn.collidepoint(location):
                         return_to_menu = True
                         running = False
 
-                    elif game_over and review_btn.collidepoint(location):
+                    elif is_game_over() and review_btn.collidepoint(location):
                         # Post-game review of the finished game, on an
                         # isolated copy; the final position (and its history
                         # browsing) is restored untouched when it closes
@@ -1019,7 +1030,8 @@ def run_game(
                         # Evaluate move selection clicks mathematically within the log
                         promoting_move = None
                         target_index = ui.get_move_log_click_index(
-                            location, len(gs.move_log), move_log_font, show_review=game_over
+                            location, len(gs.move_log), move_log_font,
+                            show_review=is_game_over()
                         )
 
                         if target_index is not None and target_index < len(gs.move_log) + len(undone_moves):
@@ -1052,7 +1064,8 @@ def run_game(
                     reset_game()
 
         # AI turn: launch a background search, then collect its result
-        if not game_over and not move_made and not is_human_turn() and promoting_move is None:
+        if (not is_game_over() and not move_made and not is_human_turn()
+                and promoting_move is None):
             if not ai_thinking:
                 ai_thinking = True
                 start_ai_search(gs, search_generation, ai_result)
@@ -1088,25 +1101,25 @@ def run_game(
             move_made = False
             move_unmake = False
             move_to_unmake = None
-            game_over = False
 
         # Core Rendering
         forced_result = ('0-1' if flag_fallen == 'w' else '1-0') if flag_fallen is not None else None
 
         graphics.draw_game_state(screen, gs, valid_moves, sq_selected, board_flipped, coord_font)
         ui.draw_player_bars(screen, gs, bar_font, board_flipped, vs_ai, ai_thinking, clocks)
-        ui.draw_move_log(screen, gs, move_log_font, forced_result, show_review=game_over)
+        ui.draw_move_log(screen, gs, move_log_font, forced_result,
+                         show_review=is_game_over())
 
         # Draw promotion UI overlay if a pawn reached the end rank
         if promoting_move is not None:
             ui.draw_promotion_menu(screen, promoting_move, board_flipped, move_log_font)
 
-        # Render match end states
+        # Render match end states. These only draw now — the end state itself
+        # is `is_game_over()`, so there is no longer a way for one of these
+        # branches to forget to record it.
         if gs.is_checkmate:
-            game_over = True
             ui.winning_animation(screen, gs, not gs.white_to_move, board_flipped)
         elif gs.is_stalemate:
-            game_over = True
             ui.stalemate_animation(screen, gs, board_flipped)
         elif flag_fallen is not None:
             ui.time_forfeit_banner(screen, flag_fallen)

@@ -18,9 +18,9 @@ This module imports from `engine.board` and nothing else in the engine. The
 search depends on it; it must never depend on the search.
 """
 from engine.board import (
-    ALL_DIRECTIONS, BB, BISHOP, BK, BN, BP, BQ, BR, DIAGONAL_DIRECTIONS, EMPTY,
+    ALL_DIRECTIONS, BISHOP, BP, DIAGONAL_DIRECTIONS, EMPTY,
     GameState, KING, KNIGHT, KNIGHT_DELTAS, ORTHOGONAL_DIRECTIONS,
-    PAWN, PIECE_TYPE, QUEEN, ROOK, WB, WK, WN, WP, WQ, WR,
+    PAWN, PIECE_TYPE, QUEEN, ROOK, WP,
 )
 
 # Evaluation cache: zobrist_key -> static score. The search revisits the same

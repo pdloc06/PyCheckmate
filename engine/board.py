@@ -425,11 +425,6 @@ class GameState:
         """Get the color character of the player whose turn it is."""
         return 'w' if self.white_to_move else 'b'
 
-    @property
-    def enemy_color(self) -> str:
-        """Get the color character of the opposing player."""
-        return 'b' if self.white_to_move else 'w'
-
     def compute_zobrist_key(self) -> int:
         """
         Compute the full Zobrist hash key of the current position from scratch.

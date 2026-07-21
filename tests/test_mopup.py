@@ -12,17 +12,13 @@ whether `evaluate()` has an opinion at all, and whether it keeps quiet where
 it should. The playout test is the one that matters: it plays a real game out
 and asserts the mate actually arrives inside the 50-move limit.
 """
-import random
-
 import pytest
 
-import engine.search as search
+from engine import search
 from engine.board import GameState, Move
-from engine.eval import MOPUP_MIN_ADVANTAGE, evaluate
-from engine.search import find_best_move
+from engine.eval import MOPUP_MIN_ADVANTAGE, _KBNK_PULL, evaluate
 from engine.movegen import generate_legal
-from engine.eval import _KBNK_PULL
-from engine.search import _root_rng
+from engine.search import find_best_move
 
 
 def _board(pieces: dict[str, str]) -> list[list[str]]:
@@ -142,7 +138,14 @@ def _play_out(gs: GameState, move_limit: int, depth: int = 4) -> tuple[bool, int
     # coin flip as the bug it is checking for — measured over 20 seeds, K+R
     # vs K converted 0/20 times before this term and 20/20 after, so an
     # unseeded single run would pass or fail more or less at random.
-    _root_rng = random.Random(20240719)
+    #
+    # Seeded *in place* through the module, exactly as `bench.py` does it.
+    # Two ways to get this wrong, both of which happened here: assigning a
+    # bare `_root_rng = ...` creates a local and leaves the real generator
+    # untouched, while rebinding `search._root_rng = Random(...)` swaps the
+    # object out from under any test holding a `from engine.search import
+    # _root_rng` reference. Mutating the shared object avoids both.
+    search._root_rng.seed(20240719)
     for ply in range(move_limit):
         moves = generate_legal(gs)
         if not moves:
