@@ -65,6 +65,24 @@ CHECKMATE_SCORE = 100_000
 MATE_THRESHOLD = 90_000  # Scores beyond this are "mate in N" scores
 DRAW_SCORE = 0
 
+# --- The 50-move rule, as the search sees it ----------------------------
+# 100 half-moves without a pawn move or capture is a draw. `make_ai_move`
+# now maintains `halfmove_clock`, so the search can finally see it.
+#
+# A hard cut at 100 alone is not enough, and the reason is worth stating: at
+# depth 6 the search would not notice the rule until the clock was already at
+# 94, far too late to do anything about it. So the static evaluation is also
+# *faded toward a draw* as the clock climbs, which gives the search a gradient
+# it can act on many moves earlier — a +300 position that is 80 half-moves
+# stale scores well under +300, and a progress move that resets the clock
+# becomes visibly better than another shuffle.
+#
+# The fade deliberately starts late. Scaling from move one would distort
+# ordinary middlegame positions, where a 30-move maneuvering phase is normal
+# play and not a failure to progress.
+HALFMOVE_DRAW_LIMIT = 100
+HALFMOVE_FADE_START = 40  # below this the clock has no effect at all
+
 # --- Positional evaluation terms ---
 # Two bishops cover both square colors; the pair is worth a few tenths of a
 # pawn beyond the pieces' individual values.
@@ -951,6 +969,45 @@ def _aspiration_search(
             return _search_root(gs, root_moves, depth, info, *full)
 
 
+def _fade_toward_draw(score: int, halfmove_clock: int) -> int:
+    """
+    Shrink a static score toward a draw as the 50-move clock runs down.
+
+    A won position that has made no progress for 80 half-moves is worth much
+    less than the same position at move 5, because the win is about to be
+    taken away by rule. Fading the score is what turns that fact into
+    something the search can act on: a move that resets the clock keeps its
+    full value while another shuffle does not, so progress starts winning the
+    comparison well before the hard limit arrives.
+
+    Mate scores are returned untouched. A forced mate is a forced mate — if
+    the search has proved one, the 50-move clock is irrelevant to it, and
+    scaling it would corrupt the mate-distance ordering.
+
+    Parameters
+    ----------
+    score : int
+        Static evaluation from the side to move's perspective.
+    halfmove_clock : int
+        Half-moves since the last pawn move or capture.
+
+    Returns
+    -------
+    int
+        The score, scaled linearly to zero between `HALFMOVE_FADE_START` and
+        `HALFMOVE_DRAW_LIMIT`.
+    """
+    if halfmove_clock <= HALFMOVE_FADE_START:
+        return score
+    if score >= MATE_THRESHOLD or score <= -MATE_THRESHOLD:
+        return score
+    # Clamped at zero: quiescence has no 50-move guard of its own, so it can
+    # be handed a clock past the limit, and an unclamped negative multiplier
+    # would flip the sign of the score rather than flatten it.
+    remaining = max(0, HALFMOVE_DRAW_LIMIT - halfmove_clock)
+    return score * remaining // (HALFMOVE_DRAW_LIMIT - HALFMOVE_FADE_START)
+
+
 def _negamax(
     gs: GameState,
     depth: int,
@@ -991,6 +1048,13 @@ def _negamax(
     if info.rep_counts.get(key, 0) >= 2:
         return DRAW_SCORE
 
+    # ...and so does running out the 50-move clock. Checked here rather than
+    # inside `evaluate()` because `_EVAL_CACHE` is keyed on the Zobrist key
+    # alone, and `halfmove_clock` is not part of that key — a position's
+    # cached static score must stay a pure function of the position.
+    if gs.halfmove_clock >= HALFMOVE_DRAW_LIMIT:
+        return DRAW_SCORE
+
     # Transposition table probe
     tt_move: MoveTuple | None = None
     entry = info.tt.get(key)
@@ -1023,7 +1087,9 @@ def _negamax(
     # is meaningless — the whole point of the check extension above).
     static_eval: int | None = None
     if depth <= max(RFP_MAX_DEPTH, FUTILITY_MAX_DEPTH) and not in_check:
-        static_eval = evaluate(gs) if gs.white_to_move else -evaluate(gs)
+        static_eval = _fade_toward_draw(
+            evaluate(gs) if gs.white_to_move else -evaluate(gs),
+            gs.halfmove_clock)
 
     # Reverse futility pruning: standing far enough above beta that no
     # reply within this depth plausibly drags us back below it.
@@ -1213,7 +1279,7 @@ def _quiescence(gs: GameState, alpha: int, beta: int, ply: int, info: SearchInfo
             return tt_score
 
     turn = 1 if gs.white_to_move else -1
-    stand_pat = turn * evaluate(gs)
+    stand_pat = _fade_toward_draw(turn * evaluate(gs), gs.halfmove_clock)
 
     if stand_pat >= beta:
         return beta

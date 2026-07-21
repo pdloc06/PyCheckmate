@@ -88,15 +88,19 @@ def test_perft_leaves_state_untouched(gs):
 
 # --- AI make/unmake synchronization (regression for the piece-set bug) ---
 def test_ai_move_random_walk_keeps_state_synced(gs):
-    """Verify piece sets and Zobrist key stay exact through random AI moves."""
+    """Verify piece sets, Zobrist key and halfmove clock stay exact."""
     rng = random.Random(42)
     stack = []
+    # Every clock value seen on the way down, so the unwind can check that
+    # each one comes back exactly rather than only the final zero.
+    clocks = []
 
     for _ in range(300):
         moves = gs.get_valid_moves(for_ai=True)
         if not moves:
             break
         move = rng.choice(moves)
+        clocks.append(gs.halfmove_clock)
         stack.append((move, gs.make_ai_move(move)))
 
         assert (gs.white_pieces, gs.black_pieces) == pieces_from_board(gs)
@@ -105,10 +109,35 @@ def test_ai_move_random_walk_keeps_state_synced(gs):
     while stack:
         move, undo = stack.pop()
         gs.unmake_ai_move(move, undo)
+        assert gs.halfmove_clock == clocks.pop()
 
     assert (gs.white_pieces, gs.black_pieces) == pieces_from_board(gs)
     assert gs.zobrist_key == gs.compute_zobrist_key()
     assert gs.board == GameState().board
+    assert gs.halfmove_clock == 0
+
+
+def test_ai_move_halfmove_clock_matches_the_ui_path(gs):
+    """
+    The two move pipelines must agree on the 50-move clock.
+
+    `make_move` (UI) and `make_ai_move` (search) maintain the clock through
+    entirely separate code, and the whole point of teaching the search the
+    rule is that it agrees with the rules the game is actually scored by. A
+    pawn move or capture resets; anything else increments.
+    """
+    from engine.chess_engine import Move
+
+    rng = random.Random(7)
+    ai_state, ui_state = GameState(), GameState()
+    for _ in range(120):
+        moves = ai_state.get_valid_moves(for_ai=True)
+        if not moves:
+            break
+        move = rng.choice(moves)
+        ai_state.make_ai_move(move)
+        ui_state.make_move(Move.from_ai_tuple(move, ui_state.board))
+        assert ai_state.halfmove_clock == ui_state.halfmove_clock
 
 
 def test_ai_castle_move_updates_rook_tracking(custom_gs):

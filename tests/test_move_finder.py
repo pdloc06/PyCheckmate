@@ -446,3 +446,57 @@ def test_search_spends_most_of_its_time_budget():
     # And it must not run away with the clock: overrunning a real budget is
     # how an engine flags.
     assert elapsed < budget * 1.5, f'overran: {elapsed:.2f}s of {budget}s'
+
+
+# --- The 50-move rule, as the search sees it ---
+def test_fade_leaves_scores_alone_early():
+    """Below the fade threshold the clock must not touch the score at all."""
+    for clock in (0, 20, move_finder.HALFMOVE_FADE_START):
+        assert move_finder._fade_toward_draw(300, clock) == 300
+        assert move_finder._fade_toward_draw(-300, clock) == -300
+
+
+def test_fade_shrinks_scores_as_the_clock_runs_out():
+    """
+    Between the fade start and the limit the score decays toward a draw,
+    monotonically and without ever changing sign.
+    """
+    previous = 300
+    for clock in range(move_finder.HALFMOVE_FADE_START + 1,
+                       move_finder.HALFMOVE_DRAW_LIMIT + 1):
+        faded = move_finder._fade_toward_draw(300, clock)
+        assert 0 <= faded <= previous
+        previous = faded
+    assert previous == 0
+
+
+def test_fade_never_flips_a_score_past_the_limit():
+    """
+    Quiescence has no 50-move guard of its own, so it can be handed a clock
+    past the limit. An unclamped multiplier would invert the score there.
+    """
+    assert move_finder._fade_toward_draw(300, 140) == 0
+    assert move_finder._fade_toward_draw(-300, 140) == 0
+
+
+def test_fade_leaves_mate_scores_intact():
+    """
+    A proved mate is unaffected by the 50-move clock, and scaling it would
+    corrupt the mate-distance ordering that picks the fastest mate.
+    """
+    mate = move_finder.CHECKMATE_SCORE - 5
+    assert move_finder._fade_toward_draw(mate, 99) == mate
+    assert move_finder._fade_toward_draw(-mate, 99) == -mate
+
+
+def test_search_scores_a_dead_fifty_move_position_as_a_draw():
+    """
+    A whole extra queen is worth nothing when the 50-move clock has expired.
+    Before the search tracked `halfmove_clock` it scored this near +900 and
+    shuffled on, which is exactly how won games were drawn.
+    """
+    fen = '8/8/4k3/8/8/4K3/8/6Q1 w - - 100 80'
+    gs = GameState.from_fen(fen)
+    assert gs.halfmove_clock == 100
+    _move, score = move_finder.search_position(gs, max_depth=3, time_limit=5.0)
+    assert score == move_finder.DRAW_SCORE

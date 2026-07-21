@@ -966,14 +966,22 @@ class GameState:
     def make_ai_move(
             self,
             move_tuple: tuple[int, int, int, int, int]
-    ) -> tuple[int, tuple[int, int] | None, tuple[bool, bool, bool, bool], int]:
+    ) -> tuple[int, tuple[int, int] | None, tuple[bool, bool, bool, bool], int, int]:
         """
         Execute a lightweight move specifically optimized for AI search trees.
 
         Maintains the board array, piece tracking sets, king locations,
-        castling rights, en-passant square, and the incremental Zobrist key.
-        It deliberately does NOT update `move_log`, `halfmove_clock`, or
+        castling rights, en-passant square, the incremental Zobrist key, and
+        `halfmove_clock`. It deliberately does NOT update `move_log` or
         `state_counts`; the search layer tracks repetitions via Zobrist keys.
+
+        `halfmove_clock` used to be skipped here too, on the reasoning that
+        the search only needed repetitions. That was wrong, and it cost real
+        games: with no halfmove clock the search cannot see the 50-move rule,
+        so in a won position with no progress move it happily scored +300
+        while the game drifted to a draw — and since equal-scored root moves
+        are shuffled, it did so by playing what looked like random moves. One
+        int in the undo package buys the search the whole rule.
 
         Parameters
         ----------
@@ -984,8 +992,8 @@ class GameState:
         Returns
         -------
         tuple
-            An undo package structured as
-            (captured_piece, old_enpassant, old_castle_rights_tuple, old_zobrist_key).
+            An undo package structured as (captured_piece, old_enpassant,
+            old_castle_rights_tuple, old_zobrist_key, old_halfmove_clock).
         """
         start_row, start_col, end_row, end_col, move_type = move_tuple
         board = self.board
@@ -999,7 +1007,17 @@ class GameState:
         )
         old_enpassant = self.enpassant_possible
         old_zobrist = self.zobrist_key
+        old_halfmove_clock = self.halfmove_clock
         old_rights_index = self._castle_rights_index()
+
+        # Same rule `make_move` applies: a pawn advance or a capture is
+        # irreversible progress and restarts the count. Move types 3-6 are
+        # promotions, which are pawn moves; type 2 is en passant, which is
+        # both. Read from the board rather than trusting the type alone.
+        if PIECE_TYPE[piece_moved] == PAWN or captured_piece != EMPTY:
+            self.halfmove_clock = 0
+        else:
+            self.halfmove_clock = old_halfmove_clock + 1
 
         is_white = piece_moved < BP
         friendly_pieces = self.white_pieces if is_white else self.black_pieces
@@ -1093,12 +1111,14 @@ class GameState:
             key ^= ZOBRIST_EP_FILE[self.enpassant_possible[1]]
         self.zobrist_key = key
 
-        return captured_piece, old_enpassant, old_castle_rights, old_zobrist
+        return (captured_piece, old_enpassant, old_castle_rights, old_zobrist,
+                old_halfmove_clock)
 
     def unmake_ai_move(
             self,
             move_tuple: tuple[int, int, int, int, int],
-            undo_package: tuple[int, tuple[int, int] | None, tuple[bool, bool, bool, bool], int]
+            undo_package: tuple[int, tuple[int, int] | None,
+                                tuple[bool, bool, bool, bool], int, int]
     ) -> None:
         """
         Reverse state changes made by `make_ai_move` directly using primitive data.
@@ -1111,9 +1131,11 @@ class GameState:
             The package returned by the corresponding `make_ai_move` call.
         """
         start_row, start_col, end_row, end_col, move_type = move_tuple
-        captured_piece, old_enpassant, old_castle_rights, old_zobrist = undo_package
+        (captured_piece, old_enpassant, old_castle_rights, old_zobrist,
+         old_halfmove_clock) = undo_package
         board = self.board
 
+        self.halfmove_clock = old_halfmove_clock
         self.white_to_move = not self.white_to_move
         piece_moved = board[end_row][end_col]
 
