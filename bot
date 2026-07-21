@@ -9,17 +9,22 @@
 # process tree, and nothing auto-restarts behind your back.
 set -u
 
-DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"   # resolve symlinks: paths must be the real clone's
-PIDFILE="$DIR/bot.pid"
-LOG="$DIR/bot.log"
+# The two directories this script drives are named outright rather than derived
+# from where the script itself sits. It used to resolve its own symlink to find
+# the lichess-bot clone, which worked only while the canonical copy lived there;
+# once this repo became the single versioned source, that lookup pointed at
+# PyCheckmate and `bot up` died on a missing run.sh.
+BOT_DIR="$HOME/PycharmProjects/lichess-bot"   # the lichess-bot clone: run.sh, .venv, .token
+PIDFILE="$BOT_DIR/bot.pid"
+LOG="$BOT_DIR/bot.log"
 # The Stockfish analysis watcher runs alongside the bot: it grades each game
 # in the idle gap after it finishes, so a multi-day unattended run arrives
 # with its analysis already done. It lives in the PyCheckmate repo's venv, not
 # lichess-bot's, so the venv sweep below cannot see it -- hence its own pid.
 ENGINE_DIR="$HOME/PycharmProjects/PyCheckmate"
-WATCHPID="$DIR/sf_watch.pid"
+WATCHPID="$BOT_DIR/sf_watch.pid"
 WATCHLOG="$HOME/.local/share/pycheckmate/sf_watch.log"
-MATCH="$DIR/.venv"   # every bot process (main + children) runs this venv's python
+MATCH="$BOT_DIR/.venv"   # every bot process (main + children) runs this venv's python
 
 alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 # The watcher is launched through `uv run`, which forks, so the pid the
@@ -68,10 +73,10 @@ up)
         echo "waiting 60s so Lichess's rate-limit window clears before reconnecting..."
         sleep 60
     fi
-    cd "$DIR" || exit 1
+    cd "$BOT_DIR" || exit 1
     # run.sh loads the token from .token and execs the venv python;
     # caffeinate -s keeps the Mac awake (on AC power) while the bot runs.
-    nohup caffeinate -s "$DIR/run.sh" >> "$LOG" 2>&1 &
+    nohup caffeinate -s "$BOT_DIR/run.sh" >> "$LOG" 2>&1 &
     echo $! > "$PIDFILE"
     # Only grade games this engine build actually played. --since auto anchors
     # the cut to when this build was first deployed, not to process start, so
