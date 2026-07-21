@@ -183,6 +183,58 @@ PASSED_PAWN_BONUS = (0, 120, 80, 50, 30, 20, 10, 0)
 # Per-pawn bonus for pawns sheltering the king (middlegame only)
 KING_SHIELD_BONUS = 12
 
+# --- Mop-up: converting a won pawnless endgame ---------------------------
+# Material plus piece-square tables is *flat* in K+Q vs K: every queen move
+# that keeps the queen safe scores the same, so the search has no reason to
+# prefer the one that shrinks the enemy king's box. `_root_rng` then shuffles
+# among the equal-scored moves and the engine wanders until the 50-move rule
+# takes the win away — the "random moves into a draw against a weaker engine"
+# the bot actually did online.
+#
+# The classical cure is two terms, and neither is about the position being
+# good; they are about making *progress* measurable. Drive the losing king to
+# the edge (it is mated at the rim, never in the centre) and walk the winning
+# king towards it (almost every basic mate needs the king's help).
+#
+# Weights are in tenths so the term stays integer. They were *measured*, not
+# taken from the textbook: the classic 4.7/1.6 pairing is too quiet against
+# this evaluation's other endgame terms (mobility and KING_END_PST are both
+# live here), and at 4.7/1.6 K+R vs K still failed to convert 1 run in 12.
+# Playing each endgame out over 20 seeded root shuffles:
+#
+#   corner/prox   K+Q vs K            K+R vs K
+#   4.7 / 1.6     12/12  med 47       11/12  med 73
+#   8.0 / 1.6     20/20  med 19 max 51    20/20  med 29 max 47
+#   12.0 / 3.0    20/20  med 19 max 41    20/20  med 29 max 29
+#
+# 12.0/3.0 wins on the number that matters — the *worst* case, since the
+# 50-move rule is a hard cap and a median says nothing about the run that
+# loses the win. The ceiling is 12*6 + 3*13 = ~111cp, which is loud enough to
+# steer a flat position but still nowhere near the 400cp the gate already
+# requires, so it can never argue with material.
+MOPUP_CORNER_WEIGHT = 120         # per unit of the losing king's centre distance
+MOPUP_KING_PROXIMITY_WEIGHT = 30  # per unit the kings are closer than 14 apart
+
+# Only chase when the advantage is actually mateable. A lone bishop or knight
+# cannot mate, and B-vs-N is dead drawn — chasing there would spend the
+# 50-move clock on a position that has no win in it. A rook's worth is the
+# natural floor: it admits K+R, K+Q and K+B+N, and excludes the rest.
+MOPUP_MIN_ADVANTAGE = 400
+
+# Centre-manhattan distance: 0 on the four middle squares, 6 in the corners.
+# The losing king's mate chances shrink as this grows, which is exactly the
+# gradient the search is missing.
+#
+# Known limitation: K+B+N vs K is not covered and still fails to convert.
+# That mate has to drive the king to a corner *of the bishop's own color*,
+# which needs a second, color-specific table rather than this symmetric one.
+# Left out deliberately — it is the rarest mate in practical play and did not
+# appear once in the 101 recorded games. Add the table if it ever does.
+_CENTRE_MANHATTAN: tuple[tuple[int, ...], ...] = tuple(
+    tuple(max(3 - row, row - 4) + max(3 - col, col - 4) for col in range(8))
+    for row in range(8)
+)
+
 # Piece-square tables (white's perspective, row 0 = rank 8).
 # Values follow Tomasz Michniewski's "Simplified Evaluation Function".
 # Black uses the same tables mirrored vertically (row -> 7 - row).
@@ -1654,6 +1706,30 @@ def evaluate(gs: GameState) -> int:
         shield = (KING_SHIELD_BONUS * _pawn_shield(board, wk_row, wk_col, WP, -1)
                   - KING_SHIELD_BONUS * _pawn_shield(board, bk_row, bk_col, BP, 1))
         score += shield * phase // PHASE_MAX
+
+    # Mop-up. Gated on there being no pawns at all, which is both the case
+    # where the evaluation goes flat and a condition already in hand from the
+    # loops above — so the common case pays one `if` on two lists and nothing
+    # else. Per-side material is only counted inside the gate, where the piece
+    # sets are a handful of entries by definition.
+    if not white_pawns and not black_pawns:
+        white_material = sum(PIECE_VALUES[board[r][c]] for r, c in gs.white_pieces)
+        black_material = sum(PIECE_VALUES[board[r][c]] for r, c in gs.black_pieces)
+        advantage = white_material - black_material
+        if advantage >= MOPUP_MIN_ADVANTAGE:
+            loser_row, loser_col = bk_row, bk_col
+            sign = 1
+        elif -advantage >= MOPUP_MIN_ADVANTAGE:
+            loser_row, loser_col = wk_row, wk_col
+            sign = -1
+        else:
+            sign = 0
+        if sign:
+            proximity = 14 - (abs(wk_row - bk_row) + abs(wk_col - bk_col))
+            score += sign * (
+                MOPUP_CORNER_WEIGHT * _CENTRE_MANHATTAN[loser_row][loser_col]
+                + MOPUP_KING_PROXIMITY_WEIGHT * proximity
+            ) // 10
 
     if len(_EVAL_CACHE) >= _EVAL_CACHE_MAX:
         _EVAL_CACHE.clear()
