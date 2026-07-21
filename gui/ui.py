@@ -9,6 +9,7 @@ import pygame as pg
 import config
 from engine.board import BP, EMPTY, GameState, INT_TO_CODE, Move
 from gui import graphics
+from engine.eval import PIECE_VALUES
 
 # Layout constants shared by draw_move_log and get_move_log_click_index so the
 # rendering and the click hit-testing can never drift apart
@@ -25,7 +26,7 @@ def _log_reserved_bottom(show_review: bool) -> int:
     return LOG_RESERVED_BOTTOM_REVIEW if show_review else LOG_RESERVED_BOTTOM
 
 # Standard chess point values (not the engine's centipawn tuning weights in
-# move_finder.PIECE_VALUES) used only to size the "+N" material lead badge
+# PIECE_VALUES) used only to size the "+N" material lead badge
 POINT_VALUES: dict[str, int] = {'Q': 9, 'R': 5, 'B': 3, 'N': 3, 'P': 1}
 STARTING_PIECE_COUNTS: dict[str, int] = {'P': 8, 'N': 2, 'B': 2, 'R': 2, 'Q': 1}
 

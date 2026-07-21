@@ -9,9 +9,23 @@ available, over the UCI protocol via a subprocess.
 
 Modules
 -------
-chess_engine : board state, move generation, make/unmake, FEN, Zobrist keys
-move_finder  : negamax search with alpha-beta, TT, quiescence, and friends
-uci          : UCI protocol adapter (run with `python -m engine.uci`)
-uci_client   : host-side client that spawns `engine.uci` as a subprocess
-bench        : speed benchmark for comparing interpreters
+board      : board state, make/unmake, attack detection, FEN, Zobrist keys
+movegen    : legal and capture generation, as free functions over a GameState
+eval       : static evaluation — material, piece-square tables, positional terms
+search     : negamax with alpha-beta, TT, quiescence, ordering, time management
+tt         : transposition table entry layout and flags
+pgn        : PGN/SAN import
+analysis   : chess.com-style game review
+uci        : UCI protocol adapter (run with `python -m engine.uci`)
+uci_client : host-side client that spawns `engine.uci` as a subprocess
+
+The dependencies run strictly one way, and that is worth preserving:
+
+    board <- movegen <- eval <- search
+
+`board` imports none of the others, so a cycle can only appear by adding an
+import that points backwards along that chain.
+
+Measurement and operations tooling lives in `engine.tools`, which may import
+freely from here but is never imported *by* the engine.
 """

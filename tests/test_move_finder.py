@@ -5,19 +5,25 @@ UCI adapter helpers.
 """
 import time
 
-from engine import move_finder
 from engine import uci
 from engine.board import (
     GameState, Move, PAWN, BISHOP, QUEEN, WP, WN, WB, WR, WQ, BP,
 )
 from engine.movegen import generate_legal
+from engine.eval import BISHOP_PAIR_BONUS, CHECKMATE_SCORE, DRAW_SCORE, ISOLATED_PAWN_PENALTY, KING_SHIELD_BONUS, MATE_THRESHOLD, MOBILITY_BONUS, PASSED_PAWN_BONUS_END, PHASE_MATERIAL_MAX, PHASE_MAX, PIECE_VALUES, PST, _EVAL_CACHE, _mobility, evaluate
+from engine import search
+from engine.search import (
+    HALFMOVE_DRAW_LIMIT, HALFMOVE_FADE_START, _fade_toward_draw, _root_rng,
+    _see, find_best_move, search_position,
+)
+from engine.tt import TTable
 
 
 # --- Search finds forced wins ---
 def test_finds_mate_in_one_back_rank():
     """Verify the search plays the immediate back-rank mate."""
     gs = GameState.from_fen('6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0)
+    best = find_best_move(gs, max_depth=3, time_limit=10.0)
     assert best is not None
     assert Move.from_ai_tuple(best, gs.board).get_uci_notation() == 'a1a8'
 
@@ -25,7 +31,7 @@ def test_finds_mate_in_one_back_rank():
 def test_finds_mate_in_one_as_black():
     """Verify mate detection works symmetrically for Black."""
     gs = GameState.from_fen('r5k1/5ppp/8/8/8/8/5PPP/6K1 b - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0)
+    best = find_best_move(gs, max_depth=3, time_limit=10.0)
     assert best is not None
     assert Move.from_ai_tuple(best, gs.board).get_uci_notation() == 'a8a1'
 
@@ -33,7 +39,7 @@ def test_finds_mate_in_one_as_black():
 def test_captures_hanging_queen():
     """Verify the search grabs an undefended queen."""
     gs = GameState.from_fen('6k1/8/8/3q4/8/3R4/8/6K1 w - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0)
+    best = find_best_move(gs, max_depth=3, time_limit=10.0)
     assert best is not None
     assert (best[2], best[3]) == (3, 3)  # Rxd5
 
@@ -42,7 +48,7 @@ def test_avoids_losing_queen_to_recapture():
     """Verify quiescence stops the queen from taking a defended pawn."""
     # Black pawn d5 is defended by the pawn on e6; Qxd5 would lose the queen
     gs = GameState.from_fen('6k1/8/4p3/3p4/8/8/3Q4/6K1 w - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0)
+    best = find_best_move(gs, max_depth=3, time_limit=10.0)
     assert best is not None
     assert (best[2], best[3]) != (3, 3)
 
@@ -76,9 +82,9 @@ def test_finds_mate_via_quiet_key_move():
     canary that LMR (and later pruning) never reduce a mating idea out of view.
     """
     gs = GameState.from_fen('7k/8/8/8/8/8/R7/1R5K w - - 0 1')
-    move, score = move_finder.search_position(gs, max_depth=4, time_limit=10.0)
+    move, score = search_position(gs, max_depth=4, time_limit=10.0)
     assert move is not None
-    assert score >= move_finder.MATE_THRESHOLD
+    assert score >= MATE_THRESHOLD
 
 
 def test_finds_knight_fork_winning_queen():
@@ -89,7 +95,7 @@ def test_finds_knight_fork_winning_queen():
     starts reducing quiet moves.
     """
     gs = GameState.from_fen('6k1/8/8/8/3n4/8/8/4Q1K1 b - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=4, time_limit=10.0)
+    best = find_best_move(gs, max_depth=4, time_limit=10.0)
     assert best is not None
     assert Move.from_ai_tuple(best, gs.board).get_uci_notation() == 'd4f3'
 
@@ -103,7 +109,7 @@ def test_aspiration_widens_on_large_swing():
     several aspiration iterations, exercising that widen-and-retry path.
     """
     gs = GameState.from_fen('6k1/8/8/8/3n4/8/8/4Q1K1 b - - 0 1')
-    best = move_finder.find_best_move(gs, max_depth=5, time_limit=15.0)
+    best = find_best_move(gs, max_depth=5, time_limit=15.0)
     assert best is not None
     assert Move.from_ai_tuple(best, gs.board).get_uci_notation() == 'd4f3'
 
@@ -116,7 +122,7 @@ def _see_of(fen, uci):
         m for m in generate_legal(gs, for_ai=True)
         if Move.from_ai_tuple(m, gs.board).get_uci_notation() == uci
     )
-    return move_finder._see(gs, move)
+    return _see(gs, move)
 
 
 def test_see_wins_undefended_pawn():
@@ -146,13 +152,13 @@ def test_returns_none_when_no_legal_moves():
     """Verify find_best_move returns None for a checkmated position."""
     # Fool's mate final position: White is mated, White to move
     gs = GameState.from_fen('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3')
-    assert move_finder.find_best_move(gs, max_depth=2, time_limit=5.0) is None
+    assert find_best_move(gs, max_depth=2, time_limit=5.0) is None
 
 
 def test_respects_precalculated_move_list(gs):
     """Verify the search only considers moves from a supplied root list."""
     only_move = (6, 0, 5, 0, 0)  # a3 as the single allowed root move
-    best = move_finder.find_best_move(gs, valid_moves=[only_move], max_depth=2, time_limit=5.0)
+    best = find_best_move(gs, valid_moves=[only_move], max_depth=2, time_limit=5.0)
     assert best == only_move
 
 
@@ -162,7 +168,7 @@ def test_search_restores_game_state(gs):
     key_before = gs.zobrist_key
     white_to_move_before = gs.white_to_move
 
-    move_finder.find_best_move(gs, max_depth=3, time_limit=10.0)
+    find_best_move(gs, max_depth=3, time_limit=10.0)
 
     assert gs.board == board_before
     assert gs.zobrist_key == key_before
@@ -172,21 +178,21 @@ def test_search_restores_game_state(gs):
 # --- Evaluation ---
 def test_evaluate_start_position_is_balanced(gs):
     """Verify the symmetric initial position evaluates to exactly zero."""
-    assert move_finder.evaluate(gs) == 0
+    assert evaluate(gs) == 0
 
 
 def test_evaluate_material_advantage():
     """Verify an extra queen dominates any positional table bonuses."""
     gs = GameState.from_fen('6k1/8/8/8/8/8/3Q4/6K1 w - - 0 1')
-    assert move_finder.evaluate(gs) > 500
+    assert evaluate(gs) > 500
 
     gs = GameState.from_fen('3q2k1/8/8/8/8/8/8/6K1 w - - 0 1')
-    assert move_finder.evaluate(gs) < -500
+    assert evaluate(gs) < -500
 
 
 def test_search_position_reports_score(gs):
     """Verify the score-returning search agrees with find_best_move."""
-    move, score = move_finder.search_position(gs, max_depth=2, time_limit=5.0)
+    move, score = search_position(gs, max_depth=2, time_limit=5.0)
     assert move is not None
     # The symmetric start position should stay close to balanced
     assert abs(score) < 100
@@ -231,7 +237,7 @@ def test_insufficient_material_scores_zero(custom_gs):
         empty_board[0][4] = 'bK'
         for row, col, piece in extra:
             empty_board[row][col] = piece
-        assert move_finder.evaluate(custom_gs(empty_board)) == move_finder.DRAW_SCORE
+        assert evaluate(custom_gs(empty_board)) == DRAW_SCORE
 
 
 def test_two_knights_draw_but_two_bishops_not(custom_gs):
@@ -242,11 +248,11 @@ def test_two_knights_draw_but_two_bishops_not(custom_gs):
     empty_board[0][4] = 'bK'
     empty_board[4][2] = 'wN'
     empty_board[4][5] = 'wN'
-    assert move_finder.evaluate(custom_gs(empty_board)) == move_finder.DRAW_SCORE
+    assert evaluate(custom_gs(empty_board)) == DRAW_SCORE
 
     empty_board[4][2] = 'wB'
     empty_board[4][5] = 'wB'
-    assert move_finder.evaluate(custom_gs(empty_board)) > 0
+    assert evaluate(custom_gs(empty_board)) > 0
 
 
 def test_bishop_pair_bonus(custom_gs):
@@ -260,19 +266,19 @@ def test_bishop_pair_bonus(custom_gs):
     empty_board[0][4] = 'bK'
     empty_board[1][0] = 'bP'
     empty_board[4][2] = 'wB'
-    one_bishop = move_finder.evaluate(custom_gs(empty_board))
+    one_bishop = evaluate(custom_gs(empty_board))
 
     empty_board[4][5] = 'wB'
     gs_two = custom_gs([row[:] for row in empty_board])
-    two_bishops = move_finder.evaluate(gs_two)
+    two_bishops = evaluate(gs_two)
 
     # The new bishop also brings its own mobility bonus. It stands on none of
     # the first bishop's diagonals, so that bishop's mobility (and every other
     # piece's) is identical in both positions and cancels out of the delta.
-    expected_gain = (move_finder.PIECE_VALUES[WB] + move_finder.PST[BISHOP][4][5]
-                     + move_finder.BISHOP_PAIR_BONUS
-                     + move_finder.MOBILITY_BONUS[BISHOP]
-                     * move_finder._mobility(gs_two.board, 4, 5, BISHOP, True))
+    expected_gain = (PIECE_VALUES[WB] + PST[BISHOP][4][5]
+                     + BISHOP_PAIR_BONUS
+                     + MOBILITY_BONUS[BISHOP]
+                     * _mobility(gs_two.board, 4, 5, BISHOP, True))
     assert two_bishops - one_bishop == expected_gain
 
 
@@ -283,10 +289,10 @@ def test_passed_pawn_bonus(custom_gs):
     empty_board[7][4] = 'wK'
     empty_board[0][4] = 'bK'
     empty_board[3][4] = 'wP'  # e5, no black pawns anywhere: passed
-    passed = move_finder.evaluate(custom_gs([row[:] for row in empty_board]))
+    passed = evaluate(custom_gs([row[:] for row in empty_board]))
 
     empty_board[2][3] = 'bP'  # d6 guards the e-pawn's path: no longer passed
-    blocked = move_finder.evaluate(custom_gs(empty_board))
+    blocked = evaluate(custom_gs(empty_board))
 
     # The delta is the black pawn's own value/PST plus the lost passed bonus
     # (the d6 pawn itself is not passed: the e5 pawn stands ahead of it),
@@ -295,9 +301,9 @@ def test_passed_pawn_bonus(custom_gs):
     # cancels out of the difference. With only kings and pawns on the board
     # the tapered phase is 0, so the *endgame* passed-pawn column applies
     # in full.
-    expected_delta = (move_finder.PIECE_VALUES[WP] + move_finder.PST[PAWN][5][3]
-                      + move_finder.PASSED_PAWN_BONUS_END[3]
-                      - move_finder.ISOLATED_PAWN_PENALTY)
+    expected_delta = (PIECE_VALUES[WP] + PST[PAWN][5][3]
+                      + PASSED_PAWN_BONUS_END[3]
+                      - ISOLATED_PAWN_PENALTY)
     assert passed - blocked == expected_delta
 
 
@@ -325,24 +331,24 @@ def test_king_pawn_shield_bonus(custom_gs):
 
     gs_shielded = custom_gs(shielded_board)
     gs_advanced = custom_gs(advanced_board)
-    shielded = move_finder.evaluate(gs_shielded)
-    advanced = move_finder.evaluate(gs_advanced)
+    shielded = evaluate(gs_shielded)
+    advanced = evaluate(gs_advanced)
 
     # Phase from the non-pawn material actually on the board (Q + R each
     # side), exactly as evaluate() computes it; the shield bonus is scaled
     # by phase/PHASE_MAX before the integer division floors it.
-    non_pawn = 2 * (move_finder.PIECE_VALUES[WQ] + move_finder.PIECE_VALUES[WR])
-    phase = min(move_finder.PHASE_MAX,
-                non_pawn * move_finder.PHASE_MAX // move_finder.PHASE_MATERIAL_MAX)
+    non_pawn = 2 * (PIECE_VALUES[WQ] + PIECE_VALUES[WR])
+    phase = min(PHASE_MAX,
+                non_pawn * PHASE_MAX // PHASE_MATERIAL_MAX)
     # The g-pawn's square also changes the white queen's mobility: on g4 it
     # blocks her d1-h5 diagonal, on g2 it doesn't. No other piece's lines
     # cross either pawn square, so the queen is the only mobility difference
     # between the two boards.
-    mobility_delta = move_finder.MOBILITY_BONUS[QUEEN] * (
-        move_finder._mobility(gs_shielded.board, 7, 3, QUEEN, True)
-        - move_finder._mobility(gs_advanced.board, 7, 3, QUEEN, True))
-    expected_delta = (move_finder.PST[PAWN][6][6] - move_finder.PST[PAWN][4][6]
-                      + move_finder.KING_SHIELD_BONUS * phase // move_finder.PHASE_MAX
+    mobility_delta = MOBILITY_BONUS[QUEEN] * (
+        _mobility(gs_shielded.board, 7, 3, QUEEN, True)
+        - _mobility(gs_advanced.board, 7, 3, QUEEN, True))
+    expected_delta = (PST[PAWN][6][6] - PST[PAWN][4][6]
+                      + KING_SHIELD_BONUS * phase // PHASE_MAX
                       + mobility_delta)
     assert shielded - advanced == expected_delta
 
@@ -352,14 +358,14 @@ def test_king_pawn_shield_bonus(custom_gs):
 def test_persistent_tt_reused_across_searches(gs):
     """Verify a caller-held table survives between searches and keeps
     growing instead of being rebuilt from scratch."""
-    tt: move_finder.TTable = {}
-    first = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
+    tt: TTable = {}
+    first = find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
     assert first is not None
     assert len(tt) > 0
 
     size_after_first = len(tt)
     gs.make_ai_move(first)
-    second = move_finder.find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
+    second = find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
     assert second in generate_legal(gs, for_ai=True)
     assert len(tt) >= size_after_first
 
@@ -367,15 +373,15 @@ def test_persistent_tt_reused_across_searches(gs):
 def test_tt_entries_carry_generation_and_age(gs):
     """Verify each TT entry stamps its search generation and that a later,
     deeper search ages entries forward (the replacement policy's aging)."""
-    tt: move_finder.TTable = {}
-    move_finder.find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
+    tt: TTable = {}
+    find_best_move(gs, max_depth=3, time_limit=10.0, tt=tt)
     assert all(len(entry) == 5 for entry in tt.values())
     gen_first = max(entry[4] for entry in tt.values())
 
     # Re-search deeper so cached entries are re-stored rather than merely hit;
     # the deeper results carry the newer generation, letting stale entries from
     # earlier moves lose ties and age out over the course of a game.
-    move_finder.find_best_move(gs, max_depth=4, time_limit=10.0, tt=tt)
+    find_best_move(gs, max_depth=4, time_limit=10.0, tt=tt)
     gen_second = max(entry[4] for entry in tt.values())
     assert gen_second > gen_first
     assert any(entry[4] == gen_second for entry in tt.values())
@@ -408,11 +414,11 @@ def test_node_count_is_reproducible_for_a_seeded_search():
     fen = 'r2q1rk1/1p1n1ppp/p1pbpn2/8/2BP4/2N1PN2/PP3PPP/R1BQ1RK1 w - - 0 11'
 
     def seeded_search() -> int:
-        move_finder._root_rng.seed(1234)
-        move_finder._EVAL_CACHE.clear()
+        _root_rng.seed(1234)
+        _EVAL_CACHE.clear()
         gs = GameState.from_fen(fen)
-        move_finder.find_best_move(gs, max_depth=4, time_limit=60.0)
-        return move_finder.last_search_nodes
+        find_best_move(gs, max_depth=4, time_limit=60.0)
+        return search.last_search_nodes
 
     first = seeded_search()
     assert first > 0
@@ -439,7 +445,7 @@ def test_search_spends_most_of_its_time_budget():
         'r2q1rk1/pp2bppp/2n1bn2/2pp4/3P4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 10')
     budget = 1.0
     start = time.perf_counter()
-    best = move_finder.find_best_move(gs, max_depth=64, time_limit=budget)
+    best = find_best_move(gs, max_depth=64, time_limit=budget)
     elapsed = time.perf_counter() - start
 
     assert best is not None
@@ -452,9 +458,9 @@ def test_search_spends_most_of_its_time_budget():
 # --- The 50-move rule, as the search sees it ---
 def test_fade_leaves_scores_alone_early():
     """Below the fade threshold the clock must not touch the score at all."""
-    for clock in (0, 20, move_finder.HALFMOVE_FADE_START):
-        assert move_finder._fade_toward_draw(300, clock) == 300
-        assert move_finder._fade_toward_draw(-300, clock) == -300
+    for clock in (0, 20, HALFMOVE_FADE_START):
+        assert _fade_toward_draw(300, clock) == 300
+        assert _fade_toward_draw(-300, clock) == -300
 
 
 def test_fade_shrinks_scores_as_the_clock_runs_out():
@@ -463,9 +469,9 @@ def test_fade_shrinks_scores_as_the_clock_runs_out():
     monotonically and without ever changing sign.
     """
     previous = 300
-    for clock in range(move_finder.HALFMOVE_FADE_START + 1,
-                       move_finder.HALFMOVE_DRAW_LIMIT + 1):
-        faded = move_finder._fade_toward_draw(300, clock)
+    for clock in range(HALFMOVE_FADE_START + 1,
+                       HALFMOVE_DRAW_LIMIT + 1):
+        faded = _fade_toward_draw(300, clock)
         assert 0 <= faded <= previous
         previous = faded
     assert previous == 0
@@ -476,8 +482,8 @@ def test_fade_never_flips_a_score_past_the_limit():
     Quiescence has no 50-move guard of its own, so it can be handed a clock
     past the limit. An unclamped multiplier would invert the score there.
     """
-    assert move_finder._fade_toward_draw(300, 140) == 0
-    assert move_finder._fade_toward_draw(-300, 140) == 0
+    assert _fade_toward_draw(300, 140) == 0
+    assert _fade_toward_draw(-300, 140) == 0
 
 
 def test_fade_leaves_mate_scores_intact():
@@ -485,9 +491,9 @@ def test_fade_leaves_mate_scores_intact():
     A proved mate is unaffected by the 50-move clock, and scaling it would
     corrupt the mate-distance ordering that picks the fastest mate.
     """
-    mate = move_finder.CHECKMATE_SCORE - 5
-    assert move_finder._fade_toward_draw(mate, 99) == mate
-    assert move_finder._fade_toward_draw(-mate, 99) == -mate
+    mate = CHECKMATE_SCORE - 5
+    assert _fade_toward_draw(mate, 99) == mate
+    assert _fade_toward_draw(-mate, 99) == -mate
 
 
 def test_search_scores_a_dead_fifty_move_position_as_a_draw():
@@ -499,5 +505,5 @@ def test_search_scores_a_dead_fifty_move_position_as_a_draw():
     fen = '8/8/4k3/8/8/4K3/8/6Q1 w - - 100 80'
     gs = GameState.from_fen(fen)
     assert gs.halfmove_clock == 100
-    _move, score = move_finder.search_position(gs, max_depth=3, time_limit=5.0)
-    assert score == move_finder.DRAW_SCORE
+    _move, score = search_position(gs, max_depth=3, time_limit=5.0)
+    assert score == DRAW_SCORE

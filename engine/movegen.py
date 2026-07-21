@@ -25,6 +25,9 @@ from engine.board import (
     WB, WK, WN, WP, WQ, WR,
 )
 
+# Type alias for the lightweight move format shared with chess_engine
+MoveTuple = tuple[int, int, int, int, int]
+
 
 def generate_legal(gs: GameState, for_ai: bool = False, captures_only: bool = False) -> list:
     """

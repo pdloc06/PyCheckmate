@@ -16,10 +16,13 @@ import random
 
 import pytest
 
-import engine.move_finder as move_finder
+import engine.search as move_finder
 from engine.board import GameState, Move
-from engine.move_finder import MOPUP_MIN_ADVANTAGE, evaluate, find_best_move
+from engine.eval import MOPUP_MIN_ADVANTAGE, evaluate
+from engine.search import find_best_move
 from engine.movegen import generate_legal
+from engine.eval import _KBNK_PULL
+from engine.search import _root_rng
 
 
 def _board(pieces: dict[str, str]) -> list[list[str]]:
@@ -104,7 +107,7 @@ def test_bishop_knight_corners_match_the_bishop_color():
     king to either of the other two is not a slower win, it is no win — the
     king walks straight back out.
     """
-    dark, light = move_finder._KBNK_PULL[1], move_finder._KBNK_PULL[0]
+    dark, light = _KBNK_PULL[1], _KBNK_PULL[0]
     # (row, col) with row 0 = rank 8: a8=(0,0) h8=(0,7) a1=(7,0) h1=(7,7).
     a8, h8, a1, h1 = (0, 0), (0, 7), (7, 0), (7, 7)
     for corner in (a1, h8):
@@ -139,7 +142,7 @@ def _play_out(gs: GameState, move_limit: int, depth: int = 4) -> tuple[bool, int
     # coin flip as the bug it is checking for — measured over 20 seeds, K+R
     # vs K converted 0/20 times before this term and 20/20 after, so an
     # unseeded single run would pass or fail more or less at random.
-    move_finder._root_rng = random.Random(20240719)
+    _root_rng = random.Random(20240719)
     for ply in range(move_limit):
         moves = generate_legal(gs)
         if not moves:

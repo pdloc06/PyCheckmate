@@ -38,11 +38,13 @@ worth a second look.
 import sys
 import time
 
-from engine import move_finder
 from engine.board import GameState
 from engine.movegen import generate_legal
+from engine.eval import _EVAL_CACHE
+from engine import search
+from engine.search import _root_rng, find_best_move
 
-# Root move order is shuffled per search (`move_finder._root_rng`) so that
+# Root move order is shuffled per search (`_root_rng`) so that
 # self-play games vary. That shuffle also changes how much the search can
 # prune, so node counts are only reproducible once the order is pinned —
 # without this seed the whole point of the benchmark quietly evaporates.
@@ -104,17 +106,20 @@ def bench_search(depth: int = SEARCH_DEPTH) -> tuple[int, float]:
     for name, fen in BENCH_POSITIONS:
         # Pin the root shuffle and clear the eval cache so this position's
         # numbers depend only on the engine, not on the run order.
-        move_finder._root_rng.seed(RNG_SEED)
-        move_finder._EVAL_CACHE.clear()
+        _root_rng.seed(RNG_SEED)
+        _EVAL_CACHE.clear()
 
         gs = GameState.from_fen(fen)
         start = time.perf_counter()
         # A generous time limit so the target depth always completes: a
         # search cut short by the clock reports whatever it reached, which
         # is not comparable across interpreters or between versions.
-        move_finder.find_best_move(gs, max_depth=depth, time_limit=600.0)
+        find_best_move(gs, max_depth=depth, time_limit=600.0)
         elapsed = time.perf_counter() - start
-        nodes = move_finder.last_search_nodes
+        # Module attribute, not a from-import: `search` rebinds this after
+        # every search, so a bound copy would stay frozen at its import-time
+        # value and this whole instrument would silently report zero.
+        nodes = search.last_search_nodes
 
         total_nodes += nodes
         total_time += elapsed

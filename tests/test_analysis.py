@@ -7,7 +7,8 @@ import time
 
 from engine import analysis
 from engine.board import GameState
-from engine.move_finder import CHECKMATE_SCORE, search_position
+from engine.eval import CHECKMATE_SCORE
+from engine.search import search_position
 from engine.movegen import generate_legal
 
 

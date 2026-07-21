@@ -15,9 +15,12 @@ Supported commands: `uci`, `isready`, `ucinewgame`,
 """
 import sys
 
-from engine import move_finder
 from engine.board import GameState, Move
 from engine.movegen import generate_legal
+from engine.eval import CHECKMATE_SCORE, MATE_THRESHOLD
+from engine.movegen import MoveTuple
+from engine.search import find_best_move
+from engine.tt import TTable
 
 ENGINE_NAME = 'PyCheckmate'
 ENGINE_AUTHOR = 'Lucas Pham'
@@ -126,7 +129,7 @@ CLOCK_MAX_DEPTH = 64     # effectively unlimited: the clock is the real cap
 # every `go` of the same game so each search starts warm from the previous
 # moves' results, and cleared on `ucinewgame`. Zobrist keys identify
 # positions absolutely, so entries stay valid as the game advances.
-transposition_table: move_finder.TTable = {}
+transposition_table: TTable = {}
 
 # Clock this game started with, learned from the first `go` that carries clock
 # fields and cleared by `ucinewgame`. None until then. See `note_initial_clock`.
@@ -385,7 +388,7 @@ def note_initial_clock(tokens: list[str], white_to_move: bool) -> float:
 
 
 def report_iteration(depth: int, score: int, nodes: int, elapsed: float,
-                     move: move_finder.MoveTuple,
+                     move: MoveTuple,
                      board: list[list[int]]) -> None:
     """
     Print one UCI `info` line for a completed deepening iteration.
@@ -408,7 +411,7 @@ def report_iteration(depth: int, score: int, nodes: int, elapsed: float,
         Nodes searched so far this move.
     elapsed : float
         Seconds spent so far this move.
-    move : move_finder.MoveTuple
+    move : MoveTuple
         Best move of this iteration.
     board : list of list of int
         Root board, needed to render the move in UCI notation.
@@ -417,10 +420,10 @@ def report_iteration(depth: int, score: int, nodes: int, elapsed: float,
     -------
     None
     """
-    if abs(score) >= move_finder.MATE_THRESHOLD:
+    if abs(score) >= MATE_THRESHOLD:
         # UCI reports mate in *moves*, signed for the side to move, while the
         # search stores plies-from-root inside the mate score.
-        plies = move_finder.CHECKMATE_SCORE - abs(score)
+        plies = CHECKMATE_SCORE - abs(score)
         moves_to_mate = (plies + 1) // 2
         report = f'mate {moves_to_mate if score > 0 else -moves_to_mate}'
     else:
@@ -461,7 +464,7 @@ def handle_go(gs: GameState, tokens: list[str]) -> str:
                                             note_initial_clock(tokens,
                                                                gs.white_to_move))
     board = gs.board
-    best = move_finder.find_best_move(
+    best = find_best_move(
         gs, max_depth=depth, time_limit=movetime, tt=transposition_table,
         hard_limit=hard,
         on_iteration=lambda d, s, n, t, m: report_iteration(d, s, n, t, m, board))

@@ -15,9 +15,11 @@ import threading
 
 import pygame as pg
 import config
-from engine import analysis, board, move_finder, pgn, uci_client
+from engine import analysis, board, pgn, uci_client
 from gui import graphics, ui, animation, review
 from engine.movegen import generate_legal
+from engine.search import find_best_move
+from engine.tt import TTable
 
 # Type alias matching move_finder's lightweight move format
 MoveTuple = tuple[int, int, int, int, int]
@@ -168,7 +170,7 @@ def run_time_control_menu(
 # move starts warm from the previous searches' work (the same reuse the PyPy
 # UCI subprocess already gets on its own side). Reset by invalidate_ai_search()
 # on undo/flip/restart. Unused when the UCI subprocess handles the search.
-_ai_transposition_table: move_finder.TTable = {}
+_ai_transposition_table: TTable = {}
 
 
 def start_ai_search(gs: board.GameState, generation: int, holder: dict) -> None:
@@ -228,7 +230,7 @@ def start_ai_search(gs: board.GameState, generation: int, holder: dict) -> None:
 
         # Fallback (and the normal path without PyPy): search in-process
         if best is None:
-            best = move_finder.find_best_move(
+            best = find_best_move(
                 search_gs,
                 max_depth=config.AI_MAX_DEPTH,
                 time_limit=config.AI_TIME_LIMIT,

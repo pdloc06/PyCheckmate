@@ -37,6 +37,7 @@ from engine.uci_client import (
 )
 from engine.movegen import generate_legal
 
+
 # How many games a full run plays, and the per-move search budget. MAX_PLIES
 # bounds a single game: draw detection already ends games (50-move / threefold
 # fold into an empty move list), but the cap guarantees termination even if

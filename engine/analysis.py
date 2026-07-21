@@ -43,12 +43,8 @@ from engine.board import (
     EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     WN, BN, BP,
 )
-from engine.move_finder import (
-    CHECKMATE_SCORE,
-    MATE_THRESHOLD,
-    PIECE_VALUES,
-    search_position,
-)
+from engine.eval import CHECKMATE_SCORE, MATE_THRESHOLD, PIECE_VALUES
+from engine.search import search_position
 from engine.movegen import generate_legal
 
 # Type alias matching move_finder's lightweight move format
