@@ -445,11 +445,7 @@ def search_position(
         # budget; a settled root move narrows it (see STABILITY_GATE_STEP).
         # The in-search abort (at the soft limit normally, the hard ceiling
         # during a panic) stays as backstop.
-        if panic:
-            gate = time_limit
-        else:
-            steps = min(STABILITY_MAX_STEPS, stable_iterations)
-            gate = time_limit * (SOFT_STOP_FRACTION - STABILITY_GATE_STEP * steps)
+        gate = soft_stop_gate(time_limit, stable_iterations, panic)
         if depth > 1 and time.perf_counter() - info.start_time > gate:
             break
         try:
@@ -643,6 +639,38 @@ def _aspiration_search(
         window *= 2
         if window > ASPIRATION_MAX:
             return _search_root(gs, root_moves, depth, info, *full)
+
+
+def soft_stop_gate(time_limit: float, stable_iterations: int,
+                   panic: bool) -> float:
+    """
+    How much of the budget may be spent before refusing to start a new depth.
+
+    Pulled out of the iterative-deepening loop so it can be tested directly.
+    A wall-clock assertion about how long a search runs is a flaky test on a
+    shared machine; the policy itself is exact arithmetic and worth pinning
+    exactly.
+
+    Parameters
+    ----------
+    time_limit : float
+        The soft budget for this move, in seconds.
+    stable_iterations : int
+        Consecutive completed iterations that returned the same root move.
+    panic : bool
+        Whether the last iteration's score collapsed (see PANIC_SCORE_DROP).
+
+    Returns
+    -------
+    float
+        The elapsed time above which a further iteration is not begun. Panic
+        opens the gate to the whole budget; otherwise it narrows one step per
+        stable iteration, from SOFT_STOP_FRACTION down to a floor of half.
+    """
+    if panic:
+        return time_limit
+    steps = min(STABILITY_MAX_STEPS, stable_iterations)
+    return time_limit * (SOFT_STOP_FRACTION - STABILITY_GATE_STEP * steps)
 
 
 def _fade_toward_draw(score: int, halfmove_clock: int) -> int:
