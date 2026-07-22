@@ -769,6 +769,120 @@ the sampler was broken.
 Applied as `94efc2d` on branch `texel-tuned`, unmerged: held-out error is not
 Elo. The SPRT decides.
 
+### The evaluation accumulator: measured before building, and dropped (2026-07-22)
+
+The plan's headline remaining item was an incremental evaluation accumulator —
+track which pieces a move changed and adjust a running score, instead of
+recomputing `evaluate()` at every node. The claim was that it "kills the 22%
+evaluation slice, makes the 1M-entry `_EVAL_CACHE` deletable, ~+0.3 ply".
+
+Decomposing `evaluate()` under PyPy over four representative positions, by
+stubbing one term at a time:
+
+| slice | cost | share | decomposable per piece? |
+| --- | --- | --- | --- |
+| mobility (ray walking) | 0.87 µs | 43.2% | **no** |
+| **material + PST** | **0.12 µs** | **5.8%** | **yes** |
+| pawns / rooks / king / outposts | 1.03 µs | 50.9% | **no** |
+| total | 2.02 µs | | |
+
+**An accumulator reaches 5.8% of the evaluation**, which is about 1.3% of
+search time. Not 22%.
+
+The reason is structural rather than incidental. Material and piece-square
+values are the *only* terms that are a pure sum over pieces, and the loop that
+collects them has to run anyway — mobility needs it, the pawn lists need it,
+the rook and knight lists need it. So the accumulator does not remove a loop;
+it removes two array lookups from inside a loop that keeps running. Everything
+costly depends on the whole board configuration: move one piece and every
+sliding piece whose ray crosses the vacated or occupied square has different
+mobility.
+
+All three original claims fail. Not 22%; `_EVAL_CACHE` stays plainly worth
+having against a ~1.9 µs evaluation; and +0.3 ply does not follow from 1.3%.
+
+The obvious next candidate was a **pawn hash** — the classic answer for pawn
+structure, which depends only on pawn placement, and pawns move far less often
+than pieces. Measured rather than assumed, and it does not rescue this either:
+
+- **Pawn-structure hit rate: 92.4%** over 49,546 evaluations across three
+  depth-6 searches, so the cache would work.
+- But **the post-loop terms it could serve are only 0.32 µs — 16% of
+  `evaluate()`**. Stopping the evaluation right after the two piece loops costs
+  1.70 µs against the full 2.02 µs.
+- And it cannot skip the loops, because they are fused: the same pass that
+  collects pawn files and square colours also does mobility and the rook,
+  knight and bishop lists. In engines where a pawn hash pays, the pawn
+  evaluation is a *separate* pass that can be skipped whole.
+
+Ceiling on a pawn hash here: roughly 0.3 µs, ~15% of the evaluation, ~3% of
+search time — better than the accumulator and still not worth delicate new
+caching machinery.
+
+**The honest conclusion is that `evaluate()` has no large safe win left.** Its
+dominant cost is mobility at 43%, which sits inside the loop and depends on
+whole-board occupancy, so it is cacheable only by something keyed on the entire
+position — which is what `_EVAL_CACHE` already is. The architecture-level
+optimization has already been done.
+
+That redirects the effort rather than ending it: the remaining lever is
+searching **fewer nodes** rather than making each node cheaper, which is move
+ordering — and it is verified by exactly the same 8-second node count.
+
+The transferable part is the sequencing. This took one measurement of about
+thirty lines, and it retired a feature that would have been days of delicate
+make/unmake plumbing — the exact code path where the 50-move clock bug hid for
+months. **Estimate the ceiling of an optimization before building it**, because
+the ceiling is usually cheaper to measure than the optimization is to write.
+
+### Settling a clock constant offline (2026-07-22)
+
+`MIN_MOVES_TO_GO` was raised 18 → 28 to push thinking time into the endgame,
+where 32% of our moves and **47% of our blunders** were being played on 8–12%
+of the clock. The plan's way of checking that was ~600 rated games: eight days,
+±28 Elo.
+
+But "did the clock move where we aimed it" is a **mechanism** question, not a
+strength question, and the two have wildly different costs. A win rate is one
+bit per game, so it needs hundreds of games. A clock allocation is one number
+per move — ~60 observations per game — and every game we have ever played
+already carries per-move timings in `game_analysis.jsonl`, lifted from the
+PGN's `%clk` tags. `engine/tools/clock_replay.py` recomputes the allocation for
+any value of the constant, over games that already happened, in about a second.
+
+On the 41 games of the current build:
+
+| phase | actual | MMTG=18 | MMTG=28 | MMTG=40 |
+| --- | --- | --- | --- | --- |
+| 1–15 | 20.2% | 33.4% | 35.2% | 38.2% |
+| 16–30 | 41.7% | 32.8% | 33.5% | 30.2% |
+| 31–45 | 25.4% | 23.0% | 19.1% | 17.9% |
+| **46+** | 12.7% | **10.8%** | **12.2%** | **13.7%** |
+
+The change does what it claims — moves 46+ gain 1.4 points of clock share,
+2.80s → 3.00s per move — and it is **smaller than the plan implied**. That
+estimate came from simulating a 90-move 5+0 game; our games run ~62 moves on
+600s, and an absolute move-count floor binds much later there.
+
+**The first version of the tool was wrong, and the error is the interesting
+part.** It reconstructed the clock from what the games *actually spent*, which
+pins every setting to the same trajectory — and that breaks the exact feedback
+loop the change relies on, since a bigger divisor is a thinner slice *now* but
+leaves a larger clock alive *later*. Measured against a fixed history, a bigger
+divisor can only look worse at every phase, by construction. The tool duly
+reported that raising the constant **hurt** the endgame by 4.1 points.
+
+It was caught only because that answer contradicted a prediction that had a
+mechanism behind it. An instrument disagreeing with a mechanistic prediction is
+a reason to audit the instrument first, not the prediction — and here the
+instrument was simulating a counterfactual while holding fixed the very
+quantity the counterfactual changes.
+`test_a_higher_floor_moves_time_into_the_endgame` pins the direction now.
+
+Two things it deliberately will not judge: whether the reallocation *helps*,
+and anything about the best-move stability exit, whose gate depends on a
+stability count the records do not carry.
+
 ### The SPRT harness was starving itself (2026-07-22)
 
 The first attempt to SPRT anything failed in a way that looked like an engine
