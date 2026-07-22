@@ -666,6 +666,62 @@ you do not have, check what its loader can read before going to collect any.**
 The measurement discipline in this repo is aimed at not believing bad numbers,
 and it worked — but it had nothing to say about a question that was never asked.
 
+### The fit on 725k positions: the spread collapsed (2026-07-22)
+
+Four seeds, 200,000 sampled positions each, **5,155 training positions per
+parameter** against 106 before. Logs kept in
+`~/.local/share/pycheckmate/tune-runs/`.
+
+| seed | start valid | best valid | change |
+| --- | --- | --- | --- |
+| 1 | 0.065585 | 0.063511 | -3.16% |
+| 2 | 0.066302 | 0.064384 | -2.89% |
+| 3 | 0.066325 | 0.064223 | -3.17% |
+| 4 | 0.064771 | 0.063169 | -2.47% |
+
+**This was the gate.** The previous run answered -3.1%, -6.2%, +0.0% and
+-17.8% depending only on which games were held out, with the *starting* error
+varying 2x; the answer was a draw from a distribution, not a measurement. The
+spread is now 0.7 points and the starting errors agree within 2.4%. Volume was
+the blocker, exactly as suspected — but the fix was the loader, not more games.
+
+Two results matter more than the error:
+
+**`PIECE_VALUES` did not move, in any seed.** The hand-picked 320/330/500/900
+were already at the fit's optimum. This also removes the change's main risk:
+the search shares `PIECE_VALUES` with static exchange evaluation, so a shift
+there would have moved move ordering as well as scoring. It does not.
+
+**The values are coherent as chess**, which the last run's were not. Passed
+pawns are the clearest case, and they read as nonsense until you check the
+indexing — index 1 is *one step from promotion*, not one step advanced:
+
+- Endgame passers keep their weight (`_END[1]` 180 -> 156-172).
+- Middlegame passers lose most of theirs (`[1]` 120 -> 40-72), and the ranks
+  furthest from promotion go slightly *negative* (`[4..6]` 30/20/10 -> about
+  -18/-12/-22).
+
+That is the eval's own comment, fitted: *"with heavy pieces still on, the same
+passer is often just a target."* The hand-picked column never expressed it.
+Compare the previous run, where *every* passed-pawn bonus went negative
+including the endgame column — that was noise, this is a shape.
+
+Two terms to treat as open questions rather than results:
+
+- **`ROOK_ON_SEVENTH_BONUS` 20 -> 4**, all four seeds agreeing. A rook on the
+  seventh is a real and well-known asset, so either the dataset's quiet filter
+  removes the positions where it pays, or the term overlaps something already
+  scored. Agreement across seeds means the fit is consistent, not that it is
+  right.
+- **`MOBILITY_BONUS[2]` (knight) 4 -> 1** while rook goes 2 -> 4 and queen
+  1 -> 4. Coherent as a redistribution toward sliding pieces, but it is the
+  other place the fit contradicts received wisdom.
+
+**Nothing is applied.** Held-out error is not Elo: it says the evaluation
+predicts game outcomes better, not that the engine plays better, and the two
+come apart when a term also feeds search behavior. Applying these needs an
+SPRT, and the machine cannot run one while the bot plays.
+
 ---
 
 ## Performance Benchmarks

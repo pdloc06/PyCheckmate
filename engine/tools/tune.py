@@ -75,9 +75,15 @@ Usage
     PYTHONPATH=. uv run --no-project python -m engine.tools.tune --games-dir DIR
 
 PyPy is worth the flag here: `evaluate()` is 2.25 us there against 20.1 us on
-CPython, and this loop does nothing else. The fit is also memory-bound — a
-`GameState` costs ~6.6 KB, so the full 725k set would need ~4.6 GB and the
-default sample of 200,000 keeps it near 1.3 GB.
+CPython, and this loop does nothing else.
+
+The real ceiling is memory, not time. A `GameState` costs 5.6 KB under PyPy
+(6.6 KB on CPython), so the full 725k set would want ~3.9 GB while the default
+sample of 200,000 holds ~1.1 GB. This machine has 8 GB, which is why running
+two seeds side by side is the cap — see the parallel recipe in `CLAUDE.md`.
+Swapping matters more than it looks: if the bot is playing, a machine that
+starts paging can lose a rated game on time, which is worse than any amount of
+shallow search.
 """
 import argparse
 import glob
