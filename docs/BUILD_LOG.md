@@ -769,6 +769,55 @@ the sampler was broken.
 Applied as `94efc2d` on branch `texel-tuned`, unmerged: held-out error is not
 Elo. The SPRT decides.
 
+### Contaminating a live SPRT while documenting how not to (2026-07-22)
+
+The rule in `CLAUDE.md` is explicit and predates all of this: *the bot and any
+timing instrument cannot run together — `sprt`, `calibrate` and `bench` timings
+all need the machine to themselves.* It was broken anyway, during the very
+session that added the memory-budget rule it exists to protect.
+
+While an SPRT was live at concurrency 2, the following ran alongside it: two
+`bench` invocations, several depth-7 PyPy search probes with 30-second limits,
+and repeated test suites. Each probe holds its own transposition table and
+evaluation cache, so this is the concurrency-4 memory failure again, arriving
+through a side door.
+
+The damage, from the match log:
+
+- **22 time forfeits out of 436 games**, none before game 201, and clustered
+  from 384 to 417 — exactly the measurement window.
+- Overruns of 261s, 540s, **925s** on a 60-second clock: the swap signature,
+  not any plausible search behaviour.
+- Asymmetric: `new` lost 15 of them, `base` 7, so the corruption biased the
+  result *against* the change under test.
+
+Recomputing from the PGN over the 416 games that finished normally:
+
+| | games | score | Elo |
+| --- | --- | --- | --- |
+| as reported by fastchess (all games) | 436 | 54.17% | +29.0 ± 29.5 |
+| **excluding time forfeits** | **416** | **55.05%** | **+35.2, CI [+1.9, +69.2]** |
+
+Two things follow, and the second matters more than the first.
+
+**The filtered number is evidence, not a verdict.** Dropping games after seeing
+them is exactly how analyses get biased, even when — as here — the exclusion
+criterion is environmental rather than chess-related. It is quoted as a
+sanity check on direction, and the SPRT's own LLR, which still contains the
+corrupted games, remains the thing that decides.
+
+**A conservative contamination is survivable; the reverse would not be.** The
+bias runs against the change, so if the SPRT still concludes H1, that
+conclusion is safe. Had it run the other way, the whole run would have to be
+discarded. That asymmetry is luck, not design, and the rule exists precisely
+because the direction of contamination is not something you get to choose.
+
+The general lesson is one this log keeps re-learning in new costumes: **an
+instrument sharing a machine is not an instrument.** Twice now the harness has
+quietly changed what it measured — the clock-fidelity trap, the concurrency-4
+memory failure — and this is the third, differing only in that the interference
+came from the person watching the experiment.
+
 ### Move ordering: where the headroom is, and why history malus failed (2026-07-22)
 
 With the evaluation's optimization space measured out, the remaining lever is
