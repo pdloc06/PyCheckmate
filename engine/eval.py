@@ -49,7 +49,7 @@ DRAW_SCORE = 0
 # --- Positional evaluation terms ---
 # Two bishops cover both square colors; the pair is worth a few tenths of a
 # pawn beyond the pieces' individual values.
-BISHOP_PAIR_BONUS = 30
+BISHOP_PAIR_BONUS = 46
 
 # --- Piece quality -----------------------------------------------------
 # Until these, the evaluation understood pawns and rooks but barely knew
@@ -63,7 +63,7 @@ BISHOP_PAIR_BONUS = 30
 # by it. Counting own pawns on the bishop's colour is the standard cheap
 # formulation. The penalty is per pawn, so a bishop behind a fixed five-pawn
 # chain is heavily discounted while one on an open board is untouched.
-BAD_BISHOP_PENALTY = 4
+BAD_BISHOP_PENALTY = 6
 
 # A knight is strongest on a square the enemy can never challenge with a pawn,
 # defended by one of ours. Nimzowitsch's original definition also wanted a
@@ -71,7 +71,7 @@ BAD_BISHOP_PENALTY = 4
 # pawn-safe", which is what this does. The bonus is deliberately smaller than
 # the outpost's reputation suggests: it stacks with the piece-square tables,
 # which already reward advanced central knights.
-KNIGHT_OUTPOST_BONUS = 18
+KNIGHT_OUTPOST_BONUS = 26
 # Rows (from White's view, row 0 = rank 8) where an outpost is worth scoring.
 # Rank 4-6 for White is rows 4-2; anything further back is not an outpost, and
 # rank 7+ is usually a tactical accident rather than a stable square.
@@ -84,9 +84,9 @@ OUTPOST_ROWS_BLACK = (3, 4, 5)
 # line and boxes in the king. These are the terms whose absence let the bot
 # shuffle its rooks along the back rank while its first online loss was
 # being squeezed (lichess.org/GDTprQUM).
-ROOK_SEMI_OPEN_FILE_BONUS = 10
-ROOK_OPEN_FILE_BONUS = 20
-ROOK_ON_SEVENTH_BONUS = 20
+ROOK_SEMI_OPEN_FILE_BONUS = 18
+ROOK_OPEN_FILE_BONUS = 16
+ROOK_ON_SEVENTH_BONUS = 8
 
 # Mobility (loss-review follow-up): a small bonus per square a piece can move
 # to or capture on. The 12-game loss review showed the bot losing by grind —
@@ -97,7 +97,7 @@ ROOK_ON_SEVENTH_BONUS = 20
 # world), queens least (their raw counts are huge and mostly noise); pawns
 # score zero (their "mobility" is structure, handled above) and so do kings
 # (freedom to wander is not a middlegame asset).
-MOBILITY_BONUS = (0, 0, 4, 3, 2, 1, 0)
+MOBILITY_BONUS = (0, 0, 1, 4, 4, 4, 0)
 MOBILITY_DIRECTIONS: dict[int, tuple[tuple[int, int], ...]] = {
     BISHOP: DIAGONAL_DIRECTIONS,
     ROOK: ORTHOGONAL_DIRECTIONS,
@@ -155,14 +155,14 @@ _KNIGHT_TARGETS: tuple[tuple[tuple[tuple[int, int], ...], ...], ...] = tuple(
 # can't create passers; isolated pawns have no pawn that can ever defend
 # them, so they tie a piece to the job. Each is charged per offending pawn
 # beyond the first / per isolated pawn.
-DOUBLED_PAWN_PENALTY = 15
+DOUBLED_PAWN_PENALTY = 11
 ISOLATED_PAWN_PENALTY = 12
 # Passed-pawn bonus indexed by the pawn's row from White's perspective
 # (row 1 = one step from promotion; rows 0 and 7 can't hold a pawn).
 # Black pawns index with the mirrored row, matching the PST convention.
-PASSED_PAWN_BONUS = (0, 120, 80, 50, 30, 20, 10, 0)
+PASSED_PAWN_BONUS = (0, 56, 16, -14, -18, -12, -6, 0)
 # Per-pawn bonus for pawns sheltering the king (middlegame only)
-KING_SHIELD_BONUS = 12
+KING_SHIELD_BONUS = 20
 
 # --- Mop-up: converting a won pawnless endgame ---------------------------
 # Material plus piece-square tables is *flat* in K+Q vs K: every queen move
@@ -399,7 +399,7 @@ PHASE_MATERIAL_MAX = 2 * (2 * 320 + 2 * 330 + 2 * 500 + 900)
 # Passed pawns promote in endgames; with heavy pieces still on, the same
 # passer is often just a target. PASSED_PAWN_BONUS (above) serves as the
 # middlegame column; this endgame column raises the stakes by half again.
-PASSED_PAWN_BONUS_END = (0, 180, 120, 75, 45, 30, 15, 0)
+PASSED_PAWN_BONUS_END = (0, 172, 128, 59, 29, 6, -1, 0)
 
 
 def _has_major_material(gs: GameState) -> bool:

@@ -261,12 +261,23 @@ def test_bishop_pair_bonus(custom_gs):
     """Verify the second bishop is worth its material + PST + pair bonus.
 
     A black pawn keeps the material "sufficient" so the insufficient-material
-    shortcut can't zero either evaluation.
+    shortcut can't zero either evaluation, and a white pawn ahead of it on the
+    next file stops *either* pawn counting as passed.
+
+    That second pawn is load-bearing, for a reason worth knowing: adding a
+    bishop raises the game phase, and the phase re-weights every blended term.
+    A passed pawn whose middlegame and endgame values differ therefore scores
+    differently in the two positions and leaks into the delta, even though the
+    pawn never moved. With only the black pawn on the board this test passed
+    for years and then failed the moment the passed-pawn values were retuned —
+    it had been relying on the old middlegame and endgame numbers happening to
+    blend to the same result at both material levels.
     """
     empty_board = [['--' for _ in range(8)] for _ in range(8)]
     empty_board[7][4] = 'wK'
     empty_board[0][4] = 'bK'
     empty_board[1][0] = 'bP'
+    empty_board[3][1] = 'wP'
     empty_board[4][2] = 'wB'
     one_bishop = evaluate(custom_gs(empty_board))
 
