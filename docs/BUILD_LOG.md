@@ -769,6 +769,62 @@ the sampler was broken.
 Applied as `94efc2d` on branch `texel-tuned`, unmerged: held-out error is not
 Elo. The SPRT decides.
 
+### Move ordering: where the headroom is, and why history malus failed (2026-07-22)
+
+With the evaluation's optimization space measured out, the remaining lever is
+searching *fewer* nodes rather than making each node cheaper — move ordering.
+The standard metric is the share of beta cutoffs found on the **first** move
+tried, since that is what alpha-beta needs to prune a whole subtree.
+
+**Baseline: 88.4%**, over 22,681 cutoffs across three depth-7 searches (97.2%
+within the first three, mean rank 0.34). Strong engines target 90-95%, so there
+was a few points of headroom. Splitting it by move type says exactly where:
+
+| cutoff move | on 1st try | later | first-move rate |
+| --- | --- | --- | --- |
+| captures | 15,302 | 449 | **97.2%** |
+| quiet | 4,739 | 2,191 | **68.4%** |
+
+**Capture ordering is already near-perfect** — TT move plus MVV-LVA plus SEE
+demotion leaves almost nothing on the table, so `capture history`, the item the
+plan carried from `ENGINE_V2_PLAN.md` §7.5, would buy essentially nothing. 83%
+of all late cutoffs are quiet moves. That is a plan item retired by five
+minutes of instrumentation.
+
+So the change built instead was for the quiet table: **history gravity**
+(scores saturate towards a ceiling rather than accumulating forever) plus
+**history malus** (quiet moves searched *before* the cutoff move are evidence
+against themselves, and were previously ignored entirely — only the winner was
+rewarded, so refuted moves kept whatever stale score they arrived with).
+
+**It measured worse and was reverted.**
+
+| position | baseline | with malus | |
+| --- | --- | --- | --- |
+| opening | 34,528 | 35,976 | +4.2% |
+| middlegame | 23,423 | 30,627 | **+30.8%** |
+| tactical | 33,872 | 34,016 | +0.4% |
+| endgame | 19,705 | 15,585 | -20.9% |
+| **total** | **111,528** | **116,204** | **+4.2%** |
+
+First-move rate moved 88.4% -> 88.6%, i.e. not at all. Node counts are exact
+here rather than noisy, because the bench seeds `_root_rng`.
+
+Two mechanisms are worth recording, since a future attempt will meet both.
+`HISTORY_MAX` at 16,384 against a bonus of `depth * depth` (≤49 at these
+depths) makes the gravity term almost inert — `current * bonus / 16384` rounds
+to nothing until a score is already huge — so what actually got measured was
+the malus alone. And the malus as written debits *every* earlier quiet move by
+the full bonus, which punishes moves for having been ordered early rather than
+for being bad; killers and previously-good moves are exactly the ones sitting
+in that list. The endgame's -21% suggests the idea is sound where the quiet
+move count is small, and the middlegame's +31% that it is actively harmful
+where it is large.
+
+Stopped here deliberately rather than tuning the malus, on a stop rule agreed
+before the work started: ship at >=90%, revert otherwise. The alternative is an
+open-ended search over a metric that is a *diagnostic*, not a deliverable.
+
 ### The evaluation accumulator: measured before building, and dropped (2026-07-22)
 
 The plan's headline remaining item was an incremental evaluation accumulator —
